@@ -1,0 +1,506 @@
+use std::{collections::HashSet, path::Path};
+
+use anyhow::Result;
+use rusqlite::{params, Connection, OptionalExtension};
+
+use crate::models::{
+    PackageManager, Preset, Project, ProjectDependency, ProjectEnvOverride, ProjectOrderUpdate,
+    ProjectStatus, ReadinessMode, RunMode, RuntimeKind, Settings, Snapshot,
+};
+
+const DEFAULT_ROOT: &str = "C:\\workspace\\apps\\BACK";
+
+fn open_connection(db_path: &Path) -> Result<Connection> {
+    let conn = Connection::open(db_path)?;
+    conn.execute_batch("PRAGMA foreign_keys = ON;")?;
+    Ok(conn)
+}
+
+fn load_project_columns(conn: &Connection) -> Result<HashSet<String>> {
+    let mut statement = conn.prepare("PRAGMA table_info(projects)")?;
+    let rows = statement.query_map([], |row| row.get::<_, String>(1))?;
+    let mut columns = HashSet::new();
+
+    for row in rows {
+        columns.insert(row?);
+    }
+
+    Ok(columns)
+}
+
+fn backfill_catalog_order(conn: &Connection) -> Result<()> {
+    let mut statement = conn.prepare(
+        "SELECT id
+         FROM projects
+         ORDER BY startup_phase, name",
+    )?;
+    let rows = statement.query_map([], |row| row.get::<_, String>(0))?;
+    let mut project_ids = Vec::new();
+
+    for row in rows {
+        project_ids.push(row?);
+    }
+
+    for (index, project_id) in project_ids.iter().enumerate() {
+        conn.execute(
+            "UPDATE projects SET catalog_order = ?1 WHERE id = ?2",
+            params![index as i64 + 1, project_id],
+        )?;
+    }
+
+    Ok(())
+}
+
+fn ensure_project_columns(conn: &Connection) -> Result<()> {
+    let columns = load_project_columns(conn)?;
+
+    if !columns.contains("catalog_order") {
+        conn.execute(
+            "ALTER TABLE projects ADD COLUMN catalog_order INTEGER NOT NULL DEFAULT 0",
+            [],
+        )?;
+        backfill_catalog_order(conn)?;
+    }
+
+    if !columns.contains("wait_for_previous_ready") {
+        conn.execute(
+            "ALTER TABLE projects ADD COLUMN wait_for_previous_ready INTEGER NOT NULL DEFAULT 0",
+            [],
+        )?;
+    }
+
+    let has_unordered_projects = conn.query_row(
+        "SELECT EXISTS(
+            SELECT 1
+            FROM projects
+            WHERE catalog_order <= 0
+        )",
+        [],
+        |row| row.get::<_, i64>(0),
+    )? == 1;
+
+    if has_unordered_projects {
+        backfill_catalog_order(conn)?;
+    }
+
+    Ok(())
+}
+
+fn resolve_catalog_order(conn: &Connection, project: &Project) -> Result<i64> {
+    if project.catalog_order > 0 {
+        return Ok(project.catalog_order);
+    }
+
+    let existing_catalog_order = conn
+        .query_row(
+            "SELECT catalog_order FROM projects WHERE id = ?1",
+            [project.id.as_str()],
+            |row| row.get::<_, i64>(0),
+        )
+        .optional()?;
+
+    if let Some(catalog_order) = existing_catalog_order {
+        if catalog_order > 0 {
+            return Ok(catalog_order);
+        }
+    }
+
+    let next_catalog_order = conn.query_row(
+        "SELECT COALESCE(MAX(catalog_order), 0) + 1 FROM projects",
+        [],
+        |row| row.get::<_, i64>(0),
+    )?;
+
+    Ok(next_catalog_order)
+}
+
+pub fn init_db(db_path: &Path) -> Result<()> {
+    let conn = open_connection(db_path)?;
+    conn.execute_batch(
+        "
+        CREATE TABLE IF NOT EXISTS app_settings (
+            key TEXT PRIMARY KEY,
+            value TEXT NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS projects (
+            id TEXT PRIMARY KEY,
+            name TEXT NOT NULL,
+            root_path TEXT NOT NULL UNIQUE,
+            runtime_kind TEXT NOT NULL,
+            package_manager TEXT NOT NULL,
+            run_mode TEXT NOT NULL,
+            run_target TEXT NOT NULL,
+            shell TEXT NOT NULL,
+            selected_env_file TEXT,
+            available_env_files_json TEXT NOT NULL DEFAULT '[]',
+            available_scripts_json TEXT NOT NULL DEFAULT '[]',
+            port INTEGER,
+            readiness_mode TEXT NOT NULL,
+            readiness_value TEXT,
+            startup_phase INTEGER NOT NULL DEFAULT 1,
+            catalog_order INTEGER NOT NULL DEFAULT 0,
+            wait_for_previous_ready INTEGER NOT NULL DEFAULT 0,
+            enabled INTEGER NOT NULL DEFAULT 1,
+            tags_json TEXT NOT NULL DEFAULT '[]',
+            last_status TEXT NOT NULL DEFAULT 'idle',
+            last_exit_code INTEGER
+        );
+
+        CREATE TABLE IF NOT EXISTS project_env_overrides (
+            id TEXT PRIMARY KEY,
+            project_id TEXT NOT NULL,
+            key TEXT NOT NULL,
+            value TEXT NOT NULL,
+            is_secret INTEGER NOT NULL DEFAULT 0,
+            enabled INTEGER NOT NULL DEFAULT 1,
+            FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE CASCADE
+        );
+
+        CREATE TABLE IF NOT EXISTS project_dependencies (
+            id TEXT PRIMARY KEY,
+            project_id TEXT NOT NULL,
+            depends_on_project_id TEXT NOT NULL,
+            required_for_start INTEGER NOT NULL DEFAULT 1,
+            FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE CASCADE
+        );
+        ",
+    )?;
+    ensure_project_columns(&conn)?;
+
+    save_default_root(db_path, DEFAULT_ROOT)?;
+    Ok(())
+}
+
+pub fn load_settings(db_path: &Path) -> Result<Settings> {
+    let conn = open_connection(db_path)?;
+    let raw = conn
+        .query_row(
+            "SELECT value FROM app_settings WHERE key = 'default_roots'",
+            [],
+            |row| row.get::<_, String>(0),
+        )
+        .optional()?;
+
+    let default_roots = raw
+        .and_then(|value| serde_json::from_str::<Vec<String>>(&value).ok())
+        .filter(|roots| !roots.is_empty())
+        .unwrap_or_else(|| vec![DEFAULT_ROOT.to_string()]);
+
+    Ok(Settings { default_roots })
+}
+
+pub fn save_default_root(db_path: &Path, root_path: &str) -> Result<()> {
+    let conn = open_connection(db_path)?;
+    let payload = serde_json::to_string(&vec![root_path.to_string()])?;
+    conn.execute(
+        "INSERT INTO app_settings (key, value) VALUES ('default_roots', ?1)
+         ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+        [payload],
+    )?;
+    Ok(())
+}
+
+pub fn list_project_root_paths(db_path: &Path) -> Result<HashSet<String>> {
+    let conn = open_connection(db_path)?;
+    let mut statement = conn.prepare("SELECT root_path FROM projects")?;
+    let rows = statement.query_map([], |row| row.get::<_, String>(0))?;
+    let mut roots = HashSet::new();
+    for row in rows {
+        roots.insert(row?);
+    }
+    Ok(roots)
+}
+
+fn load_env_overrides(conn: &Connection, project_id: &str) -> Result<Vec<ProjectEnvOverride>> {
+    let mut statement = conn.prepare(
+        "SELECT id, key, value, is_secret, enabled
+         FROM project_env_overrides
+         WHERE project_id = ?1
+         ORDER BY key",
+    )?;
+    let rows = statement.query_map([project_id], |row| {
+        Ok(ProjectEnvOverride {
+            id: row.get(0)?,
+            key: row.get(1)?,
+            value: row.get(2)?,
+            is_secret: row.get::<_, i64>(3)? == 1,
+            enabled: row.get::<_, i64>(4)? == 1,
+        })
+    })?;
+
+    let mut overrides = Vec::new();
+    for row in rows {
+        overrides.push(row?);
+    }
+    Ok(overrides)
+}
+
+fn load_dependencies(conn: &Connection, project_id: &str) -> Result<Vec<ProjectDependency>> {
+    let mut statement = conn.prepare(
+        "SELECT id, depends_on_project_id, required_for_start
+         FROM project_dependencies
+         WHERE project_id = ?1
+         ORDER BY depends_on_project_id",
+    )?;
+    let rows = statement.query_map([project_id], |row| {
+        Ok(ProjectDependency {
+            id: row.get(0)?,
+            depends_on_project_id: row.get(1)?,
+            required_for_start: row.get::<_, i64>(2)? == 1,
+        })
+    })?;
+
+    let mut dependencies = Vec::new();
+    for row in rows {
+        dependencies.push(row?);
+    }
+    Ok(dependencies)
+}
+
+pub fn list_projects(db_path: &Path) -> Result<Vec<Project>> {
+    let conn = open_connection(db_path)?;
+    let mut statement = conn.prepare(
+        "SELECT
+            id,
+            name,
+            root_path,
+            runtime_kind,
+            package_manager,
+            run_mode,
+            run_target,
+            shell,
+            selected_env_file,
+            available_env_files_json,
+            available_scripts_json,
+            port,
+            readiness_mode,
+            readiness_value,
+            startup_phase,
+            catalog_order,
+            wait_for_previous_ready,
+            enabled,
+            tags_json,
+            last_status,
+            last_exit_code
+         FROM projects
+         ORDER BY catalog_order, startup_phase, name",
+    )?;
+
+    let rows = statement.query_map([], |row| {
+        let available_env_files: String = row.get(9)?;
+        let available_scripts: String = row.get(10)?;
+        let tags_json: String = row.get(18)?;
+        Ok(Project {
+            id: row.get(0)?,
+            name: row.get(1)?,
+            root_path: row.get(2)?,
+            runtime_kind: RuntimeKind::from_db(&row.get::<_, String>(3)?),
+            package_manager: PackageManager::from_db(&row.get::<_, String>(4)?),
+            run_mode: RunMode::from_db(&row.get::<_, String>(5)?),
+            run_target: row.get(6)?,
+            shell: row.get(7)?,
+            selected_env_file: row.get(8)?,
+            available_env_files: serde_json::from_str(&available_env_files).unwrap_or_default(),
+            available_scripts: serde_json::from_str(&available_scripts).unwrap_or_default(),
+            port: row.get::<_, Option<u16>>(11)?,
+            readiness_mode: ReadinessMode::from_db(&row.get::<_, String>(12)?),
+            readiness_value: row.get(13)?,
+            startup_phase: row.get(14)?,
+            catalog_order: row.get(15)?,
+            wait_for_previous_ready: row.get::<_, i64>(16)? == 1,
+            enabled: row.get::<_, i64>(17)? == 1,
+            tags: serde_json::from_str(&tags_json).unwrap_or_default(),
+            env_overrides: Vec::new(),
+            dependencies: Vec::new(),
+            status: ProjectStatus::from_db(&row.get::<_, String>(19)?),
+            last_exit_code: row.get(20)?,
+        })
+    })?;
+
+    let mut projects = Vec::new();
+    for row in rows {
+        let mut project = row?;
+        project.env_overrides = load_env_overrides(&conn, &project.id)?;
+        project.dependencies = load_dependencies(&conn, &project.id)?;
+        projects.push(project);
+    }
+
+    Ok(projects)
+}
+
+pub fn save_project(db_path: &Path, project: &Project) -> Result<()> {
+    let conn = open_connection(db_path)?;
+    let catalog_order = resolve_catalog_order(&conn, project)?;
+    conn.execute(
+        "INSERT INTO projects (
+            id, name, root_path, runtime_kind, package_manager, run_mode, run_target, shell,
+            selected_env_file, available_env_files_json, available_scripts_json, port,
+            readiness_mode, readiness_value, startup_phase, catalog_order, wait_for_previous_ready,
+            enabled, tags_json, last_status, last_exit_code
+         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21)
+         ON CONFLICT(id) DO UPDATE SET
+            name = excluded.name,
+            root_path = excluded.root_path,
+            runtime_kind = excluded.runtime_kind,
+            package_manager = excluded.package_manager,
+            run_mode = excluded.run_mode,
+            run_target = excluded.run_target,
+            shell = excluded.shell,
+            selected_env_file = excluded.selected_env_file,
+            available_env_files_json = excluded.available_env_files_json,
+            available_scripts_json = excluded.available_scripts_json,
+            port = excluded.port,
+            readiness_mode = excluded.readiness_mode,
+            readiness_value = excluded.readiness_value,
+            startup_phase = excluded.startup_phase,
+            catalog_order = excluded.catalog_order,
+            wait_for_previous_ready = excluded.wait_for_previous_ready,
+            enabled = excluded.enabled,
+            tags_json = excluded.tags_json,
+            last_status = excluded.last_status,
+            last_exit_code = excluded.last_exit_code",
+        params![
+            project.id,
+            project.name,
+            project.root_path,
+            project.runtime_kind.as_str(),
+            project.package_manager.as_str(),
+            project.run_mode.as_str(),
+            project.run_target,
+            project.shell,
+            project.selected_env_file,
+            serde_json::to_string(&project.available_env_files)?,
+            serde_json::to_string(&project.available_scripts)?,
+            project.port,
+            project.readiness_mode.as_str(),
+            project.readiness_value,
+            project.startup_phase,
+            catalog_order,
+            if project.wait_for_previous_ready { 1 } else { 0 },
+            if project.enabled { 1 } else { 0 },
+            serde_json::to_string(&project.tags)?,
+            project.status.as_str(),
+            project.last_exit_code
+        ],
+    )?;
+
+    conn.execute("DELETE FROM project_env_overrides WHERE project_id = ?1", [project.id.as_str()])?;
+    for override_entry in &project.env_overrides {
+        conn.execute(
+            "INSERT INTO project_env_overrides (id, project_id, key, value, is_secret, enabled)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            params![
+                override_entry.id,
+                project.id,
+                override_entry.key,
+                override_entry.value,
+                if override_entry.is_secret { 1 } else { 0 },
+                if override_entry.enabled { 1 } else { 0 }
+            ],
+        )?;
+    }
+
+    conn.execute("DELETE FROM project_dependencies WHERE project_id = ?1", [project.id.as_str()])?;
+    for dependency in &project.dependencies {
+        conn.execute(
+            "INSERT INTO project_dependencies (id, project_id, depends_on_project_id, required_for_start)
+             VALUES (?1, ?2, ?3, ?4)",
+            params![
+                dependency.id,
+                project.id,
+                dependency.depends_on_project_id,
+                if dependency.required_for_start { 1 } else { 0 }
+            ],
+        )?;
+    }
+
+    Ok(())
+}
+
+pub fn reorder_projects(db_path: &Path, updates: &[ProjectOrderUpdate]) -> Result<()> {
+    let mut conn = open_connection(db_path)?;
+    let mut statement = conn.prepare(
+        "SELECT id
+         FROM projects
+         ORDER BY catalog_order, startup_phase, name",
+    )?;
+    let rows = statement.query_map([], |row| row.get::<_, String>(0))?;
+    let mut existing_ids = Vec::new();
+
+    for row in rows {
+        existing_ids.push(row?);
+    }
+    drop(statement);
+
+    let mut seen = HashSet::new();
+    let mut ordered_ids = Vec::new();
+    let mut sorted_updates = updates.to_vec();
+    sorted_updates.sort_by_key(|entry| entry.catalog_order);
+
+    for update in &sorted_updates {
+        if existing_ids.iter().any(|project_id| project_id == &update.project_id)
+            && seen.insert(update.project_id.clone())
+        {
+            ordered_ids.push(update.project_id.clone());
+        }
+    }
+
+    for project_id in existing_ids {
+        if seen.insert(project_id.clone()) {
+            ordered_ids.push(project_id);
+        }
+    }
+
+    let transaction = conn.transaction()?;
+    for (index, project_id) in ordered_ids.iter().enumerate() {
+        transaction.execute(
+            "UPDATE projects SET catalog_order = ?1 WHERE id = ?2",
+            params![index as i64 + 1, project_id],
+        )?;
+    }
+    transaction.commit()?;
+
+    Ok(())
+}
+
+pub fn delete_project(db_path: &Path, project_id: &str) -> Result<()> {
+    let conn = open_connection(db_path)?;
+    conn.execute("DELETE FROM projects WHERE id = ?1", [project_id])?;
+    Ok(())
+}
+
+pub fn update_project_status(
+    db_path: &Path,
+    project_id: &str,
+    status: ProjectStatus,
+    exit_code: Option<i32>,
+) -> Result<()> {
+    let conn = open_connection(db_path)?;
+    conn.execute(
+        "UPDATE projects SET last_status = ?1, last_exit_code = ?2 WHERE id = ?3",
+        params![status.as_str(), exit_code, project_id],
+    )?;
+    Ok(())
+}
+
+pub fn build_snapshot(db_path: &Path) -> Result<Snapshot> {
+    let settings = load_settings(db_path)?;
+    let projects = list_projects(db_path)?;
+    let preset = Preset {
+        id: "all-enabled".to_string(),
+        name: "Todos los habilitados".to_string(),
+        description: "Ejecuta todos los proyectos habilitados".to_string(),
+        project_ids: projects
+            .iter()
+            .filter(|project| project.enabled)
+            .map(|project| project.id.clone())
+            .collect(),
+    };
+
+    Ok(Snapshot {
+        settings,
+        projects,
+        presets: vec![preset],
+    })
+}

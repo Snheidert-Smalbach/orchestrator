@@ -1,0 +1,434 @@
+import {
+  ChevronDown,
+  ChevronRight,
+  GripVertical,
+  Play,
+  Rocket,
+  Square,
+  TriangleAlert,
+} from "lucide-react";
+import { Fragment, useEffect, useState } from "react";
+import type { Project, ProjectResourceUsage } from "../lib/types";
+import { StatusPill } from "./status-pill";
+
+interface ProjectListProps {
+  projects: Project[];
+  selectedProjectId: string | null;
+  conflictedProjectIds: Set<string>;
+  forceStopProjectIds: string[];
+  forceStartProjectIds: string[];
+  projectResources: Record<string, ProjectResourceUsage>;
+  onSelect: (projectId: string) => void;
+  onToggleEnabled: (project: Project, enabled: boolean) => void;
+  onToggleWaitForPreviousReady: (project: Project, enabled: boolean) => void;
+  onReorderProjects: (orderedProjectIds: string[]) => void;
+  onStartProject: (projectId: string) => void;
+  onStopProject: (projectId: string) => void;
+  onForceStopProject: (projectId: string) => void;
+  onForceStartProject: (projectId: string) => void;
+}
+
+const rowToneByStatus: Record<Project["status"], string> = {
+  idle: "bg-white/[0.015] hover:bg-white/[0.045]",
+  starting: "bg-warn/14 hover:bg-warn/22",
+  running: "bg-info/14 hover:bg-info/22",
+  ready: "bg-ok/14 hover:bg-ok/22",
+  stopped: "bg-white/[0.03] hover:bg-white/[0.06]",
+  failed: "bg-danger/16 hover:bg-danger/24",
+};
+
+const markerToneByStatus: Record<Project["status"], string> = {
+  idle: "bg-line/45",
+  starting: "bg-warn shadow-[0_0_14px_rgba(250,204,21,0.4)]",
+  running: "bg-info shadow-[0_0_14px_rgba(35,213,246,0.4)]",
+  ready: "bg-ok shadow-[0_0_14px_rgba(34,197,94,0.4)]",
+  stopped: "bg-line/55",
+  failed: "bg-danger shadow-[0_0_16px_rgba(248,113,113,0.42)]",
+};
+
+function buildRowStyle(options: {
+  status: Project["status"];
+  isSelected: boolean;
+  hasConflict: boolean;
+  canForceStop: boolean;
+  canForceStart: boolean;
+  isDropBefore: boolean;
+  isDropAfter: boolean;
+}) {
+  const shadows: string[] = [];
+
+  if (options.canForceStart || options.hasConflict) {
+    shadows.push("inset 4px 0 0 0 rgba(250, 204, 21, 0.88)");
+  } else if (options.canForceStop || options.status === "failed") {
+    shadows.push("inset 4px 0 0 0 rgba(248, 113, 113, 0.88)");
+  } else if (options.status === "ready") {
+    shadows.push("inset 4px 0 0 0 rgba(34, 197, 94, 0.82)");
+  } else if (options.status === "running" || options.status === "starting") {
+    shadows.push("inset 4px 0 0 0 rgba(35, 213, 246, 0.82)");
+  }
+
+  if (options.isSelected) {
+    shadows.push(
+      "inset 0 0 0 1px rgba(35, 213, 246, 0.55)",
+      "0 22px 38px -30px rgba(35, 213, 246, 0.6)",
+    );
+  }
+
+  if (options.isDropBefore) {
+    shadows.push("inset 0 2px 0 0 rgba(35, 213, 246, 0.8)");
+  }
+
+  if (options.isDropAfter) {
+    shadows.push("inset 0 -2px 0 0 rgba(35, 213, 246, 0.8)");
+  }
+
+  return {
+    boxShadow: shadows.length ? shadows.join(", ") : undefined,
+  };
+}
+
+export function ProjectList({
+  projects,
+  selectedProjectId,
+  conflictedProjectIds,
+  forceStopProjectIds,
+  forceStartProjectIds,
+  projectResources,
+  onSelect,
+  onToggleEnabled,
+  onToggleWaitForPreviousReady,
+  onReorderProjects,
+  onStartProject,
+  onStopProject,
+  onForceStopProject,
+  onForceStartProject,
+}: ProjectListProps) {
+  const [expandedProjectIds, setExpandedProjectIds] = useState<Record<string, boolean>>({});
+  const [draggedProjectId, setDraggedProjectId] = useState<string | null>(null);
+  const [dropTarget, setDropTarget] = useState<{ projectId: string; position: "before" | "after" } | null>(null);
+  const forceStopSet = new Set(forceStopProjectIds);
+  const forceStartSet = new Set(forceStartProjectIds);
+
+  function toggleExpanded(projectId: string) {
+    setExpandedProjectIds((current) => ({
+      ...current,
+      [projectId]: !current[projectId],
+    }));
+  }
+
+  function clearDragState() {
+    setDraggedProjectId(null);
+    setDropTarget(null);
+    document.body.style.cursor = "";
+    document.body.style.userSelect = "";
+  }
+
+  function buildReorderedIds(targetProjectId: string, position: "before" | "after") {
+    if (!draggedProjectId || draggedProjectId === targetProjectId) {
+      return projects.map((project) => project.id);
+    }
+
+    const orderedIds = projects.map((project) => project.id);
+    const fromIndex = orderedIds.indexOf(draggedProjectId);
+    const targetIndex = orderedIds.indexOf(targetProjectId);
+
+    if (fromIndex < 0 || targetIndex < 0) {
+      return orderedIds;
+    }
+
+    orderedIds.splice(fromIndex, 1);
+    const nextTargetIndex = orderedIds.indexOf(targetProjectId);
+    const insertAt = position === "before" ? nextTargetIndex : nextTargetIndex + 1;
+    orderedIds.splice(insertAt, 0, draggedProjectId);
+
+    return orderedIds;
+  }
+
+  function handleDrop(targetProjectId: string, position: "before" | "after") {
+    const orderedIds = buildReorderedIds(targetProjectId, position);
+    const currentIds = projects.map((project) => project.id);
+    clearDragState();
+
+    if (orderedIds.join("|") !== currentIds.join("|")) {
+      onReorderProjects(orderedIds);
+    }
+  }
+
+  useEffect(() => {
+    if (!draggedProjectId) {
+      return;
+    }
+
+    document.body.style.cursor = "grabbing";
+    document.body.style.userSelect = "none";
+
+    function updateDropTarget(clientX: number, clientY: number) {
+      const element = document.elementFromPoint(clientX, clientY);
+      const row = element instanceof HTMLElement ? element.closest<HTMLElement>("[data-project-row]") : null;
+      if (!row) {
+        setDropTarget(null);
+        return;
+      }
+
+      const targetProjectId = row.dataset.projectRow ?? null;
+      if (!targetProjectId || targetProjectId === draggedProjectId) {
+        setDropTarget(null);
+        return;
+      }
+
+      const bounds = row.getBoundingClientRect();
+      const position = clientY < bounds.top + bounds.height / 2 ? "before" : "after";
+      setDropTarget({ projectId: targetProjectId, position });
+    }
+
+    function handlePointerMove(event: PointerEvent) {
+      updateDropTarget(event.clientX, event.clientY);
+    }
+
+    function finishDrag() {
+      if (dropTarget) {
+        handleDrop(dropTarget.projectId, dropTarget.position);
+      } else {
+        clearDragState();
+      }
+    }
+
+    window.addEventListener("pointermove", handlePointerMove);
+    window.addEventListener("pointerup", finishDrag);
+    window.addEventListener("pointercancel", finishDrag);
+
+    return () => {
+      window.removeEventListener("pointermove", handlePointerMove);
+      window.removeEventListener("pointerup", finishDrag);
+      window.removeEventListener("pointercancel", finishDrag);
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+    };
+  }, [draggedProjectId, dropTarget, projects]);
+
+  return (
+    <div className="surface-panel flex h-full min-h-0 flex-col overflow-hidden">
+      <div className="surface-divider flex items-center justify-between px-3 py-2.5">
+        <div>
+          <p className="text-[9px] uppercase tracking-[0.22em] text-textSoft">Catalogo</p>
+          <h2 className="mt-0.5 text-[13px] font-semibold text-textStrong">Servicios configurados</h2>
+        </div>
+        <span className="surface-chip px-2 py-1 text-[10px] text-textMuted">
+          {projects.length} proyectos
+        </span>
+      </div>
+
+      <div className="min-h-0 flex-1 overflow-auto scrollbar-thin px-2 pb-2">
+        <table className="min-w-full border-separate border-spacing-y-1 text-[11px]">
+          <thead className="sticky top-0 z-10 bg-panel/88 backdrop-blur-xl">
+            <tr className="text-left text-[9px] uppercase tracking-[0.16em] text-textSoft shadow-[inset_0_-1px_0_rgb(var(--color-line)/0.14)]">
+              <th className="w-[44px] px-2 py-2">Run</th>
+              <th className="px-2 py-2">Servicio</th>
+              <th className="w-[58px] px-2 py-2">Port</th>
+              <th className="w-[48px] px-2 py-2">Ord</th>
+              <th className="w-[56px] px-2 py-2">Prev</th>
+              <th className="w-[88px] px-2 py-2">Estado</th>
+              <th className="w-[170px] px-2 py-2">Acc.</th>
+            </tr>
+          </thead>
+          <tbody>
+            {projects.map((project) => {
+              const isSelected = project.id === selectedProjectId;
+              const hasConflict = conflictedProjectIds.has(project.id);
+              const canForceStop = forceStopSet.has(project.id);
+              const canForceStart = forceStartSet.has(project.id);
+              const isExpanded = expandedProjectIds[project.id] ?? false;
+              const resourceUsage = projectResources[project.id];
+              const isDropBefore = dropTarget?.projectId === project.id && dropTarget.position === "before";
+              const isDropAfter = dropTarget?.projectId === project.id && dropTarget.position === "after";
+
+              return (
+                <Fragment key={project.id}>
+                  <tr
+                    data-project-row={project.id}
+                    className={[
+                      "cursor-pointer transition-[background,opacity] duration-150",
+                      rowToneByStatus[project.status],
+                      draggedProjectId === project.id ? "opacity-55" : "",
+                      project.enabled ? "" : "opacity-60",
+                    ].join(" ")}
+                    style={buildRowStyle({
+                      status: project.status,
+                      isSelected,
+                      hasConflict,
+                      canForceStop,
+                      canForceStart,
+                      isDropBefore,
+                      isDropAfter,
+                    })}
+                    onClick={() => onSelect(project.id)}
+                  >
+                    <td className="px-2 py-2.5 align-middle">
+                      <input
+                        type="checkbox"
+                        checked={project.enabled}
+                        onChange={(event) => {
+                          event.stopPropagation();
+                          onToggleEnabled(project, event.target.checked);
+                        }}
+                        onClick={(event) => event.stopPropagation()}
+                        title="Incluir en Iniciar habilitados"
+                      />
+                    </td>
+                    <td className="px-2 py-2.5 align-middle">
+                      <div className="flex min-w-0 items-center gap-1.5">
+                        <button
+                          type="button"
+                          className="surface-chip cursor-grab p-0.5 text-textMuted transition hover:bg-panelSoft/70 active:cursor-grabbing"
+                          onPointerDown={(event) => {
+                            event.preventDefault();
+                            event.stopPropagation();
+                            setDraggedProjectId(project.id);
+                          }}
+                          onClick={(event) => event.stopPropagation()}
+                          title="Arrastrar para cambiar el orden de arranque"
+                        >
+                          <GripVertical className="h-3 w-3" />
+                        </button>
+                        <button
+                          type="button"
+                          className="surface-chip p-0.5 text-textMuted transition hover:bg-panelSoft/70"
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            toggleExpanded(project.id);
+                          }}
+                          title={isExpanded ? "Ocultar detalle" : "Mostrar detalle"}
+                        >
+                          {isExpanded ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
+                        </button>
+                        <div className="min-w-0">
+                          <div className="flex min-w-0 items-center gap-1.5">
+                            <span className={["h-5 w-1.5 shrink-0", markerToneByStatus[project.status]].join(" ")} />
+                            <p className="truncate text-[11px] font-semibold leading-4 text-textStrong">{project.name}</p>
+                            {hasConflict ? <TriangleAlert className="h-3.5 w-3.5 shrink-0 text-warn" /> : null}
+                            {canForceStart ? <Rocket className="h-3.5 w-3.5 shrink-0 text-warn" /> : null}
+                            {!canForceStart && canForceStop ? <TriangleAlert className="h-3.5 w-3.5 shrink-0 text-danger" /> : null}
+                          </div>
+                        </div>
+                      </div>
+                    </td>
+                    <td className="px-2 py-2.5 align-middle text-[11px] leading-4 text-textStrong">{project.port ?? "n/a"}</td>
+                    <td className="px-2 py-2.5 align-middle text-[11px] leading-4 text-textStrong">{project.catalogOrder}</td>
+                    <td className="px-2 py-2.5 align-middle">
+                      <input
+                        type="checkbox"
+                        checked={project.waitForPreviousReady}
+                        onChange={(event) => {
+                          event.stopPropagation();
+                          onToggleWaitForPreviousReady(project, event.target.checked);
+                        }}
+                        onClick={(event) => event.stopPropagation()}
+                        title="Esperar a que el servicio anterior quede ready antes de iniciar este"
+                      />
+                    </td>
+                    <td className="px-2 py-2.5 align-middle">
+                      <StatusPill status={project.status} />
+                    </td>
+                    <td className="px-2 py-2.5 align-middle">
+                      <div className="flex gap-1">
+                        <button
+                          type="button"
+                          className="bg-ok/14 p-1 text-ok shadow-[inset_0_0_0_1px_rgba(34,197,94,0.18)] transition hover:bg-ok/22"
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            onStartProject(project.id);
+                          }}
+                          title="Iniciar proyecto"
+                        >
+                          <Play className="h-3 w-3" />
+                        </button>
+                        <button
+                          type="button"
+                          className="surface-chip p-1 text-textStrong transition hover:bg-panelSoft/72"
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            onStopProject(project.id);
+                          }}
+                          title="Detener proyecto"
+                        >
+                          <Square className="h-3 w-3" />
+                        </button>
+                        {canForceStart ? (
+                          <button
+                            type="button"
+                            className="bg-warn/14 px-2 py-1 text-[10px] font-semibold text-warn shadow-[inset_0_0_0_1px_rgba(250,204,21,0.2)] transition hover:bg-warn/22"
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              onForceStartProject(project.id);
+                            }}
+                            title="Liberar puerto y volver a iniciar el proyecto"
+                          >
+                            Forzar e iniciar
+                          </button>
+                        ) : null}
+                        {!canForceStart && canForceStop ? (
+                          <button
+                            type="button"
+                            className="bg-danger/14 px-2 py-1 text-[10px] font-semibold text-danger shadow-[inset_0_0_0_1px_rgba(248,113,113,0.2)] transition hover:bg-danger/22"
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              onForceStopProject(project.id);
+                            }}
+                            title="Forzar detencion del proyecto"
+                          >
+                            Forzar
+                          </button>
+                        ) : null}
+                      </div>
+                    </td>
+                  </tr>
+
+                  {isExpanded ? (
+                    <tr className={project.enabled ? "" : "opacity-60"}>
+                      <td colSpan={7} className="px-2 pb-1.5 pt-0.5">
+                        <div className="surface-panel-soft grid gap-1.5 px-2 py-1.5 text-[10px] leading-4 text-textMuted md:grid-cols-[minmax(0,1.9fr)_minmax(0,1.15fr)_minmax(0,1fr)]">
+                          <div className="min-w-0">
+                            <p className="text-[9px] uppercase tracking-[0.14em] text-textSoft">Ruta</p>
+                            <p className="truncate text-textMuted" title={project.rootPath}>{project.rootPath}</p>
+                          </div>
+                          <div className="min-w-0">
+                            <p className="text-[9px] uppercase tracking-[0.14em] text-textSoft">Run target</p>
+                            <p className="truncate text-textMuted" title={project.runTarget}>
+                              {project.packageManager} / {project.runMode === "script" ? "script" : "command"} / {project.runTarget}
+                            </p>
+                          </div>
+                          <div className="min-w-0">
+                            <p className="text-[9px] uppercase tracking-[0.14em] text-textSoft">.env</p>
+                            <p className="truncate text-textMuted" title={project.selectedEnvFile ?? "Sin .env"}>
+                              {project.selectedEnvFile ?? "Sin .env"}
+                            </p>
+                          </div>
+                          <div className="min-w-0">
+                            <p className="text-[9px] uppercase tracking-[0.14em] text-textSoft">Arranque</p>
+                            <p className="truncate text-textMuted" title={`Orden ${project.catalogOrder} · fase ${project.startupPhase}`}>
+                              #{project.catalogOrder} / fase {project.startupPhase} / {project.waitForPreviousReady ? "espera ready del anterior" : "sin espera"}
+                            </p>
+                          </div>
+                          <div className="min-w-0">
+                            <p className="text-[9px] uppercase tracking-[0.14em] text-textSoft">Recursos</p>
+                            {resourceUsage ? (
+                              <p className="truncate text-textMuted" title={resourceUsage.commandPreview ?? "Sin comando"}>
+                                PID {resourceUsage.trackedPid ?? "n/a"} / {resourceUsage.totalProcesses} proc / {resourceUsage.totalWorkingSetMb.toFixed(1)} MB
+                              </p>
+                            ) : (
+                              <p className="truncate text-textMuted">Sin proceso rastreado</p>
+                            )}
+                          </div>
+                        </div>
+                      </td>
+                    </tr>
+                  ) : null}
+                </Fragment>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
