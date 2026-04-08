@@ -1,10 +1,14 @@
 import {
   ChevronDown,
   ChevronRight,
+  FolderPlus,
+  FolderSearch,
   GripVertical,
+  LoaderCircle,
   Play,
   Rocket,
   Square,
+  Trash2,
   TriangleAlert,
 } from "lucide-react";
 import { Fragment, useEffect, useState } from "react";
@@ -26,6 +30,10 @@ interface ProjectListProps {
   onStopProject: (projectId: string) => void;
   onForceStopProject: (projectId: string) => void;
   onForceStartProject: (projectId: string) => void;
+  onDeleteProject: (projectId: string) => void;
+  onImportProject: () => Promise<void>;
+  onOpenScanDialog: () => void;
+  isBusy: boolean;
 }
 
 const rowToneByStatus: Record<Project["status"], string> = {
@@ -102,6 +110,10 @@ export function ProjectList({
   onStopProject,
   onForceStopProject,
   onForceStartProject,
+  onDeleteProject,
+  onImportProject,
+  onOpenScanDialog,
+  isBusy,
 }: ProjectListProps) {
   const [expandedProjectIds, setExpandedProjectIds] = useState<Record<string, boolean>>({});
   const [draggedProjectId, setDraggedProjectId] = useState<string | null>(null);
@@ -208,14 +220,36 @@ export function ProjectList({
 
   return (
     <div className="surface-panel flex h-full min-h-0 flex-col overflow-hidden">
-      <div className="surface-divider flex items-center justify-between px-3 py-2.5">
+      <div className="surface-divider flex flex-wrap items-center justify-between gap-2 px-3 py-2.5">
         <div>
           <p className="text-[9px] uppercase tracking-[0.22em] text-textSoft">Catalogo</p>
           <h2 className="mt-0.5 text-[13px] font-semibold text-textStrong">Servicios configurados</h2>
         </div>
-        <span className="surface-chip px-2 py-1 text-[10px] text-textMuted">
-          {projects.length} proyectos
-        </span>
+        <div className="flex flex-wrap items-center gap-1.5">
+          <button
+            type="button"
+            className="surface-chip inline-flex items-center gap-1.5 px-2 py-1.5 text-[10px] font-semibold text-textStrong"
+            onClick={onOpenScanDialog}
+            disabled={isBusy}
+            title="Escanear una carpeta base e importar varios servicios"
+          >
+            <FolderSearch className="h-3.5 w-3.5" />
+            Escanear
+          </button>
+          <button
+            type="button"
+            className="inline-flex items-center gap-1.5 border border-accent/40 bg-accent/10 px-2 py-1.5 text-[10px] font-semibold text-accent disabled:cursor-not-allowed disabled:opacity-60"
+            onClick={() => void onImportProject()}
+            disabled={isBusy}
+            title="Seleccionar una carpeta e importarla al catalogo"
+          >
+            {isBusy ? <LoaderCircle className="h-3.5 w-3.5 animate-spin" /> : <FolderPlus className="h-3.5 w-3.5" />}
+            Agregar carpeta
+          </button>
+          <span className="surface-chip px-2 py-1 text-[10px] text-textMuted">
+            {projects.length} proyectos
+          </span>
+        </div>
       </div>
 
       <div className="min-h-0 flex-1 overflow-auto scrollbar-thin px-2 pb-2">
@@ -228,7 +262,7 @@ export function ProjectList({
               <th className="w-[48px] px-2 py-2">Ord</th>
               <th className="w-[56px] px-2 py-2">Prev</th>
               <th className="w-[88px] px-2 py-2">Estado</th>
-              <th className="w-[170px] px-2 py-2">Acc.</th>
+              <th className="w-[220px] px-2 py-2">Acc.</th>
             </tr>
           </thead>
           <tbody>
@@ -237,6 +271,8 @@ export function ProjectList({
               const hasConflict = conflictedProjectIds.has(project.id);
               const canForceStop = forceStopSet.has(project.id);
               const canForceStart = forceStartSet.has(project.id);
+              const showForceStopAction = canForceStop || ["starting", "running", "ready", "failed"].includes(project.status);
+              const showForceStopWarning = canForceStop;
               const isExpanded = expandedProjectIds[project.id] ?? false;
               const resourceUsage = projectResources[project.id];
               const isDropBefore = dropTarget?.projectId === project.id && dropTarget.position === "before";
@@ -307,7 +343,7 @@ export function ProjectList({
                             <p className="truncate text-[11px] font-semibold leading-4 text-textStrong">{project.name}</p>
                             {hasConflict ? <TriangleAlert className="h-3.5 w-3.5 shrink-0 text-warn" /> : null}
                             {canForceStart ? <Rocket className="h-3.5 w-3.5 shrink-0 text-warn" /> : null}
-                            {!canForceStart && canForceStop ? <TriangleAlert className="h-3.5 w-3.5 shrink-0 text-danger" /> : null}
+                            {!canForceStart && showForceStopWarning ? <TriangleAlert className="h-3.5 w-3.5 shrink-0 text-danger" /> : null}
                           </div>
                         </div>
                       </div>
@@ -366,7 +402,7 @@ export function ProjectList({
                             Forzar e iniciar
                           </button>
                         ) : null}
-                        {!canForceStart && canForceStop ? (
+                        {!canForceStart && showForceStopAction ? (
                           <button
                             type="button"
                             className="bg-danger/14 px-2 py-1 text-[10px] font-semibold text-danger shadow-[inset_0_0_0_1px_rgba(248,113,113,0.2)] transition hover:bg-danger/22"
@@ -379,6 +415,17 @@ export function ProjectList({
                             Forzar
                           </button>
                         ) : null}
+                        <button
+                          type="button"
+                          className="surface-chip p-1 text-danger transition hover:bg-danger/18"
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            onDeleteProject(project.id);
+                          }}
+                          title="Quitar servicio del catalogo importado"
+                        >
+                          <Trash2 className="h-3 w-3" />
+                        </button>
                       </div>
                     </td>
                   </tr>
@@ -405,7 +452,7 @@ export function ProjectList({
                           </div>
                           <div className="min-w-0">
                             <p className="text-[9px] uppercase tracking-[0.14em] text-textSoft">Arranque</p>
-                            <p className="truncate text-textMuted" title={`Orden ${project.catalogOrder} · fase ${project.startupPhase}`}>
+                            <p className="truncate text-textMuted" title={`Orden ${project.catalogOrder} Ãƒâ€šÃ‚Â· fase ${project.startupPhase}`}>
                               #{project.catalogOrder} / fase {project.startupPhase} / {project.waitForPreviousReady ? "espera ready del anterior" : "sin espera"}
                             </p>
                           </div>

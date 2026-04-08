@@ -1,14 +1,12 @@
-﻿import { GripVertical, RotateCcw, TerminalSquare } from "lucide-react";
+import { GripVertical, RotateCcw, TerminalSquare } from "lucide-react";
 import {
   useEffect,
   useMemo,
   useRef,
-  useState,
-  type DragEvent,
-  type PointerEvent as ReactPointerEvent,
+  useState,  type PointerEvent as ReactPointerEvent,
   type ReactNode,
 } from "react";
-import type { Project, ProjectResourceUsage } from "../lib/types";
+import type { Preset, Project, ProjectResourceUsage } from "../lib/types";
 import { LogConsole } from "./log-console";
 import { ProjectDetail } from "./project-detail";
 import { ProjectList } from "./project-list";
@@ -42,19 +40,25 @@ type Props = {
   onStopProject: (projectId: string) => void;
   onForceStopProject: (projectId: string) => void;
   onForceStartProject: (projectId: string) => void;
+  onImportProject: () => Promise<void>;
+  onOpenScanDialog: () => void;
   onSaveProject: (project: Project, options?: { quiet?: boolean }) => Promise<void>;
   onDeleteProject: (projectId: string) => Promise<void>;
+  onDeleteProjectFromList: (projectId: string) => void;
+  presets: Preset[];
+  onToggleProjectPreset: (presetId: string, projectId: string, enabled: boolean) => void;
+  isBusy: boolean;
 };
 
 const LAYOUT_STORAGE_KEY = "back-orchestrator.workspace-layout.vscode";
 const LEGACY_LAYOUT_STORAGE_KEY = "back-orchestrator.workspace-layout";
 const PANEL_IDS: WorkspacePanelId[] = ["catalog", "detail", "console"];
 const ZONE_IDS: WorkspaceZoneId[] = ["left", "main", "right", "bottom"];
-const MIN_SIDE_WIDTH = 0.18;
-const MAX_SIDE_WIDTH = 0.38;
-const MIN_CENTER_WIDTH = 0.26;
-const MIN_BOTTOM_HEIGHT = 0.2;
-const MAX_BOTTOM_HEIGHT = 0.58;
+const MIN_SIDE_WIDTH = 0.08;
+const MAX_SIDE_WIDTH = 0.68;
+const MIN_CENTER_WIDTH = 0.12;
+const MIN_BOTTOM_HEIGHT = 0.12;
+const MAX_BOTTOM_HEIGHT = 0.82;
 
 const panelLabels: Record<WorkspacePanelId, string> = {
   catalog: "Catalogo",
@@ -69,12 +73,6 @@ const zoneLabels: Record<WorkspaceZoneId, string> = {
   bottom: "Abajo",
 };
 
-const zoneShortLabels: Record<WorkspaceZoneId, string> = {
-  left: "Izq",
-  main: "Ctr",
-  right: "Der",
-  bottom: "Abj",
-};
 
 const preferredZoneByPanel: Record<WorkspacePanelId, WorkspaceZoneId> = {
   catalog: "left",
@@ -240,11 +238,18 @@ export function WorkspaceLayout({
   onStopProject,
   onForceStopProject,
   onForceStartProject,
+  onImportProject,
+  onOpenScanDialog,
   onSaveProject,
   onDeleteProject,
+  onDeleteProjectFromList,
+  presets,
+  onToggleProjectPreset,
+  isBusy,
 }: Props) {
   const [layout, setLayout] = useState<LayoutState>(loadInitialLayout);
   const [dropZoneId, setDropZoneId] = useState<WorkspaceZoneId | null>(null);
+  const [dragPanelId, setDragPanelId] = useState<WorkspacePanelId | null>(null);
   const workspaceRef = useRef<HTMLDivElement | null>(null);
   const topRowRef = useRef<HTMLDivElement | null>(null);
   const dragPanelRef = useRef<WorkspacePanelId | null>(null);
@@ -260,48 +265,79 @@ export function WorkspaceLayout({
   }, [layout]);
 
   useEffect(() => {
-    function handlePointerMove(event: PointerEvent) {
-      const resizeState = resizeStateRef.current;
-      if (!resizeState) {
-        return;
-      }
-
-      const delta = (event[resizeState.target === "bottom" ? "clientY" : "clientX"] - resizeState.startPointer) / resizeState.containerSize;
-      setLayout((current) => {
-        if (resizeState.target === "bottom") {
-          return {
-            ...current,
-            bottomHeight: clamp(resizeState.startValue - delta, MIN_BOTTOM_HEIGHT, MAX_BOTTOM_HEIGHT),
-          };
-        }
-
-        if (resizeState.target === "left") {
-          const maxLeftWidth = current.zones.right.length > 0 ? 1 - MIN_CENTER_WIDTH - current.rightWidth : 1 - MIN_CENTER_WIDTH;
-          return {
-            ...current,
-            leftWidth: clamp(resizeState.startValue + delta, MIN_SIDE_WIDTH, Math.min(MAX_SIDE_WIDTH, maxLeftWidth)),
-          };
-        }
-
-        const maxRightWidth = current.zones.left.length > 0 ? 1 - MIN_CENTER_WIDTH - current.leftWidth : 1 - MIN_CENTER_WIDTH;
-        return {
-          ...current,
-          rightWidth: clamp(resizeState.startValue - delta, MIN_SIDE_WIDTH, Math.min(MAX_SIDE_WIDTH, maxRightWidth)),
-        };
-      });
-    }
-
-    function handlePointerUp() {
-      resizeStateRef.current = null;
+    function resetPointerUi() {
       document.body.style.cursor = "";
       document.body.style.userSelect = "";
     }
 
+    function handlePointerMove(event: PointerEvent) {
+      const resizeState = resizeStateRef.current;
+      if (resizeState) {
+        const delta = (event[resizeState.target === "bottom" ? "clientY" : "clientX"] - resizeState.startPointer) / resizeState.containerSize;
+        setLayout((current) => {
+          if (resizeState.target === "bottom") {
+            return {
+              ...current,
+              bottomHeight: clamp(resizeState.startValue - delta, MIN_BOTTOM_HEIGHT, MAX_BOTTOM_HEIGHT),
+            };
+          }
+
+          if (resizeState.target === "left") {
+            const maxLeftWidth = current.zones.right.length > 0 ? 1 - MIN_CENTER_WIDTH - current.rightWidth : 1 - MIN_CENTER_WIDTH;
+            return {
+              ...current,
+              leftWidth: clamp(resizeState.startValue + delta, MIN_SIDE_WIDTH, Math.min(MAX_SIDE_WIDTH, maxLeftWidth)),
+            };
+          }
+
+          const maxRightWidth = current.zones.left.length > 0 ? 1 - MIN_CENTER_WIDTH - current.leftWidth : 1 - MIN_CENTER_WIDTH;
+          return {
+            ...current,
+            rightWidth: clamp(resizeState.startValue - delta, MIN_SIDE_WIDTH, Math.min(MAX_SIDE_WIDTH, maxRightWidth)),
+          };
+        });
+        return;
+      }
+
+      if (!dragPanelRef.current) {
+        return;
+      }
+
+      setDropZoneId(resolveZoneIdFromPoint(event.clientX, event.clientY));
+    }
+
+    function handlePointerUp(event: PointerEvent) {
+      if (resizeStateRef.current) {
+        resizeStateRef.current = null;
+        resetPointerUi();
+        return;
+      }
+
+      const panelId = dragPanelRef.current;
+      if (panelId) {
+        const zoneId = resolveZoneIdFromPoint(event.clientX, event.clientY);
+        if (zoneId) {
+          setLayout((current) => movePanel(current, panelId, zoneId));
+        }
+        clearDragState();
+      }
+
+      resetPointerUi();
+    }
+
+    function handlePointerCancel() {
+      resizeStateRef.current = null;
+      clearDragState();
+      resetPointerUi();
+    }
+
     window.addEventListener("pointermove", handlePointerMove);
     window.addEventListener("pointerup", handlePointerUp);
+    window.addEventListener("pointercancel", handlePointerCancel);
     return () => {
       window.removeEventListener("pointermove", handlePointerMove);
       window.removeEventListener("pointerup", handlePointerUp);
+      window.removeEventListener("pointercancel", handlePointerCancel);
     };
   }, []);
 
@@ -323,6 +359,10 @@ export function WorkspaceLayout({
           onStopProject={onStopProject}
           onForceStopProject={onForceStopProject}
           onForceStartProject={onForceStartProject}
+          onDeleteProject={onDeleteProjectFromList}
+          onImportProject={onImportProject}
+          onOpenScanDialog={onOpenScanDialog}
+          isBusy={isBusy}
         />
       ),
       detail: (
@@ -333,6 +373,8 @@ export function WorkspaceLayout({
           allProjects={projects}
           canForceStop={selectedProject ? forceStopProjectIds.includes(selectedProject.id) : false}
           canForceStart={selectedProject ? forceStartProjectIds.includes(selectedProject.id) : false}
+          presets={presets}
+          onToggleProjectPreset={onToggleProjectPreset}
           onSave={onSaveProject}
           onStart={(projectId) => Promise.resolve(onStartProject(projectId))}
           onStop={(projectId) => Promise.resolve(onStopProject(projectId))}
@@ -350,8 +392,12 @@ export function WorkspaceLayout({
       onDeleteProject,
       onForceStopProject,
       onForceStartProject,
+      onImportProject,
+      onOpenScanDialog,
+      onDeleteProjectFromList,
       onReorderProjects,
       onSaveProject,
+      isBusy,
       onSelectProject,
       onStartProject,
       onStopProject,
@@ -359,9 +405,11 @@ export function WorkspaceLayout({
       onToggleEnabled,
       projectResources,
       projects,
+      presets,
       selectedProject,
       selectedProjectId,
       selectedProjectMessage,
+      onToggleProjectPreset,
     ],
   );
 
@@ -371,6 +419,13 @@ export function WorkspaceLayout({
 
   function findPanelZone(panelId: WorkspacePanelId) {
     return ZONE_IDS.find((zoneId) => layout.zones[zoneId].includes(panelId)) ?? null;
+  }
+
+  function resolveZoneIdFromPoint(clientX: number, clientY: number) {
+    const element = document.elementFromPoint(clientX, clientY);
+    const zoneElement = element instanceof HTMLElement ? element.closest<HTMLElement>("[data-workspace-zone]") : null;
+    const zoneId = zoneElement?.dataset.workspaceZone;
+    return ZONE_IDS.includes(zoneId as WorkspaceZoneId) ? (zoneId as WorkspaceZoneId) : null;
   }
 
   function setActivePanel(zoneId: WorkspaceZoneId, panelId: WorkspacePanelId) {
@@ -408,11 +463,16 @@ export function WorkspaceLayout({
     setLayout((current) => movePanel(current, panelId, targetZoneId));
   }
 
+  function clearDragState() {
+    dragPanelRef.current = null;
+    setDragPanelId(null);
+    setDropZoneId(null);
+  }
+
   function resetLayout() {
     window.localStorage.removeItem(LAYOUT_STORAGE_KEY);
     window.localStorage.removeItem(LEGACY_LAYOUT_STORAGE_KEY);
-    dragPanelRef.current = null;
-    setDropZoneId(null);
+    clearDragState();
     setLayout(defaultLayout);
   }
 
@@ -442,48 +502,34 @@ export function WorkspaceLayout({
     event.preventDefault();
   }
 
-  function handleDragStart(panelId: WorkspacePanelId, event: DragEvent<HTMLButtonElement>) {
-    dragPanelRef.current = panelId;
-    event.dataTransfer.effectAllowed = "move";
-    event.dataTransfer.setData("text/plain", panelId);
-  }
-
-  function handleZoneDrop(zoneId: WorkspaceZoneId) {
-    const panelId = dragPanelRef.current;
-    if (!panelId) {
+  function startPanelDrag(panelId: WorkspacePanelId, event: ReactPointerEvent<HTMLButtonElement>) {
+    if (event.button !== 0) {
       return;
     }
 
-    movePanelToZone(panelId, zoneId);
-    dragPanelRef.current = null;
-    setDropZoneId(null);
+    dragPanelRef.current = panelId;
+    setDragPanelId(panelId);
+    setDropZoneId(findPanelZone(panelId));
+    document.body.style.cursor = "grabbing";
+    document.body.style.userSelect = "none";
   }
 
   function renderZone(zoneId: WorkspaceZoneId) {
     const panels = layout.zones[zoneId];
     const activePanelId = layout.active[zoneId];
     const resolvedPanelId = activePanelId && panels.includes(activePanelId) ? activePanelId : panels[0] ?? null;
+    const isDropTarget = dropZoneId === zoneId && dragPanelId != null;
 
     return (
-        <section
-          className={[
-          "surface-panel-soft flex h-full min-h-0 flex-col overflow-hidden",
-          dropZoneId === zoneId ? "bg-accent/10 shadow-[inset_0_0_0_1px_rgba(35,213,246,0.22)]" : "",
+      <section
+        data-workspace-zone={zoneId}
+        className={[
+          "surface-panel-soft relative flex h-full min-h-0 flex-col overflow-hidden transition-[background,box-shadow,border-color] duration-150",
+          dragPanelId ? "border border-dashed border-line/70" : "",
+          isDropTarget ? "bg-accent/10 shadow-[inset_0_0_0_1px_rgba(35,213,246,0.32),0_0_0_1px_rgba(35,213,246,0.18)]" : "",
         ].join(" ")}
-        onDragOver={(event) => {
-          event.preventDefault();
-          if (dragPanelRef.current) {
-            setDropZoneId(zoneId);
-          }
-        }}
-        onDragLeave={() => {
-          if (dropZoneId === zoneId) {
-            setDropZoneId(null);
-          }
-        }}
-        onDrop={() => handleZoneDrop(zoneId)}
       >
-        <div className="surface-divider flex items-center justify-between gap-2 bg-panelSoft/46 px-1.5 py-1">
+        <div className="surface-divider flex items-center justify-between gap-2 bg-panelSoft/46 px-2 py-1.5">
           <div className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto scrollbar-thin">
             {panels.length ? panels.map((panelId) => {
               const isActive = panelId === resolvedPanelId;
@@ -491,20 +537,16 @@ export function WorkspaceLayout({
                 <button
                   key={`${zoneId}-${panelId}`}
                   type="button"
-                  draggable
-                  onDragStart={(event) => handleDragStart(panelId, event)}
-                  onDragEnd={() => {
-                    dragPanelRef.current = null;
-                    setDropZoneId(null);
-                  }}
+                  onPointerDown={(event) => startPanelDrag(panelId, event)}
                   onClick={() => setActivePanel(zoneId, panelId)}
                   className={[
-                    "inline-flex shrink-0 items-center gap-1 border px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-[0.12em] transition",
+                    "inline-flex shrink-0 cursor-grab items-center gap-1 border px-2 py-1 text-[9px] font-semibold uppercase tracking-[0.12em] transition active:cursor-grabbing",
                     isActive
                       ? "border-accent/40 bg-accent/10 text-accent"
                       : "border-line bg-panel/55 text-textMuted hover:bg-panelSoft/75",
+                    dragPanelId === panelId ? "opacity-70" : "",
                   ].join(" ")}
-                  title="Arrastra la pestana a otra zona"
+                  title={`Arrastra ${panelLabels[panelId]} a otra zona`}
                 >
                   <GripVertical className="h-2.5 w-2.5" />
                   {panelLabels[panelId]}
@@ -512,31 +554,35 @@ export function WorkspaceLayout({
               );
             }) : <span className="px-1 text-[9px] uppercase tracking-[0.16em] text-textSoft">Zona libre</span>}
           </div>
-          <div className="flex shrink-0 items-center gap-1">
-            {ZONE_IDS.map((targetZoneId) => (
-              <button
-                key={`${zoneId}-${targetZoneId}`}
-                type="button"
-                disabled={!resolvedPanelId || targetZoneId === zoneId}
-                className={[
-                  "border px-1 py-0.5 text-[9px] font-semibold uppercase tracking-[0.1em] transition",
-                  targetZoneId === zoneId
-                    ? "border-accent/40 bg-accent/10 text-accent"
-                    : "border-line bg-panelSoft/70 text-textMuted hover:bg-panelSoft",
-                  !resolvedPanelId || targetZoneId === zoneId ? "opacity-60" : "",
-                ].join(" ")}
-                title={resolvedPanelId ? `Mover ${panelLabels[resolvedPanelId]} a ${zoneLabels[targetZoneId]}` : zoneLabels[targetZoneId]}
-                onClick={() => {
-                  if (resolvedPanelId) {
-                    movePanelToZone(resolvedPanelId, targetZoneId);
-                  }
-                }}
-              >
-                {zoneShortLabels[targetZoneId]}
-              </button>
-            ))}
+          <div className="hidden shrink-0 items-center gap-2 md:flex">
+            {dragPanelId ? (
+              <span className={[
+                "text-[9px] font-semibold uppercase tracking-[0.14em]",
+                isDropTarget ? "text-accent" : "text-textSoft",
+              ].join(" ")}>
+                {isDropTarget ? `Suelta ${panelLabels[dragPanelId]} aqui` : zoneLabels[zoneId]}
+              </span>
+            ) : (
+              <span className="text-[9px] uppercase tracking-[0.14em] text-textSoft">
+                Arrastra y suelta
+              </span>
+            )}
           </div>
         </div>
+        {dragPanelId ? (
+          <div className="pointer-events-none absolute inset-x-3 top-10 z-10 flex justify-end">
+            <span className={[
+              "rounded-full border px-2 py-1 text-[9px] font-semibold uppercase tracking-[0.14em] shadow-[0_12px_28px_-18px_rgba(2,8,20,0.9)] backdrop-blur",
+              isDropTarget
+                ? "border-accent/45 bg-accent/14 text-accent"
+                : "border-line/80 bg-panel/82 text-textMuted",
+            ].join(" ")}>
+              {isDropTarget
+                ? `Mover ${panelLabels[dragPanelId]} a ${zoneLabels[zoneId].toLowerCase()}`
+                : `Suelta en ${zoneLabels[zoneId].toLowerCase()}`}
+            </span>
+          </div>
+        ) : null}
         <div className="min-h-0 flex-1 overflow-hidden">
           {resolvedPanelId ? panelRegistry[resolvedPanelId] : (
             <div className="flex h-full min-h-0 items-center justify-center bg-panel/45 px-4 text-[11px] text-textSoft">
@@ -550,8 +596,8 @@ export function WorkspaceLayout({
 
   return (
     <div ref={workspaceRef} className="surface-panel-soft flex h-full min-h-0 flex-1 flex-col overflow-hidden">
-      <div className="surface-divider flex shrink-0 items-center justify-between gap-2 bg-panel/80 px-2 py-1">
-        <div className="flex min-w-0 flex-1 flex-wrap gap-1">
+      <div className="surface-divider flex shrink-0 items-center justify-between gap-2 bg-panel/80 px-2 py-1.5">
+        <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1">
           {PANEL_IDS.map((panelId) => {
             const zoneId = findPanelZone(panelId);
             const isActive = zoneId ? layout.active[zoneId] === panelId : false;
@@ -560,20 +606,32 @@ export function WorkspaceLayout({
               <button
                 key={panelId}
                 type="button"
+                onPointerDown={(event) => startPanelDrag(panelId, event)}
                 className={[
-                  "inline-flex items-center gap-1 border px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-[0.12em] transition",
+                  "inline-flex cursor-grab items-center gap-1 border px-2 py-1 text-[9px] font-semibold uppercase tracking-[0.12em] transition active:cursor-grabbing",
                   isActive
                     ? "border-accent/40 bg-accent/10 text-accent"
                     : "border-line bg-panelSoft/70 text-textMuted hover:bg-panelSoft",
+                  dragPanelId === panelId ? "opacity-70" : "",
                 ].join(" ")}
                 onClick={() => focusPanel(panelId)}
-                title={zoneId ? `Mostrar ${panelLabels[panelId]} en ${zoneLabels[zoneId].toLowerCase()}` : `Mostrar ${panelLabels[panelId]}`}
+                title={zoneId
+                  ? `Mostrar ${panelLabels[panelId]} y arrastrarlo desde ${zoneLabels[zoneId].toLowerCase()}`
+                  : `Mostrar ${panelLabels[panelId]} y arrastrarlo a una zona`}
               >
+                <GripVertical className="h-2.5 w-2.5" />
                 {panelLabels[panelId]}
-                <span className="text-[8px] text-textSoft">{zoneId ? zoneShortLabels[zoneId] : "--"}</span>
               </button>
             );
           })}
+          <span className={[
+            "ml-1 hidden text-[9px] uppercase tracking-[0.14em] lg:inline",
+            dragPanelId ? "text-accent" : "text-textSoft",
+          ].join(" ")}>
+            {dragPanelId
+              ? `Suelta ${panelLabels[dragPanelId]} en la zona que quieras`
+              : "Arrastra paneles y usa los separadores para redimensionar"}
+          </span>
         </div>
         <div className="flex shrink-0 items-center gap-1">
           <button
@@ -607,11 +665,11 @@ export function WorkspaceLayout({
 
           {hasLeftZone ? (
             <div
-              className="flex w-1.5 shrink-0 cursor-col-resize items-center justify-center bg-panelSoft/24 hover:bg-accent/18"
+              className="group flex w-2.5 shrink-0 cursor-col-resize items-center justify-center rounded-full bg-panelSoft/30 transition hover:bg-accent/20 active:bg-accent/28"
               onPointerDown={(event) => startResize("left", event)}
               title="Redimensionar zona izquierda"
             >
-              <div className="h-10 w-px bg-line/70" />
+              <div className="h-12 w-0.5 rounded-full bg-line/70 transition group-hover:h-16 group-hover:bg-accent/55" />
             </div>
           ) : null}
 
@@ -621,11 +679,11 @@ export function WorkspaceLayout({
 
           {hasRightZone ? (
             <div
-              className="flex w-1.5 shrink-0 cursor-col-resize items-center justify-center bg-panelSoft/24 hover:bg-accent/18"
+              className="group flex w-2.5 shrink-0 cursor-col-resize items-center justify-center rounded-full bg-panelSoft/30 transition hover:bg-accent/20 active:bg-accent/28"
               onPointerDown={(event) => startResize("right", event)}
               title="Redimensionar zona derecha"
             >
-              <div className="h-10 w-px bg-line/70" />
+              <div className="h-12 w-0.5 rounded-full bg-line/70 transition group-hover:h-16 group-hover:bg-accent/55" />
             </div>
           ) : null}
 
@@ -638,11 +696,11 @@ export function WorkspaceLayout({
 
         {hasBottomZone ? (
           <div
-            className="flex h-1.5 shrink-0 cursor-row-resize items-center justify-center bg-panelSoft/24 hover:bg-accent/18"
+            className="group flex h-2.5 shrink-0 cursor-row-resize items-center justify-center rounded-full bg-panelSoft/30 transition hover:bg-accent/20 active:bg-accent/28"
             onPointerDown={(event) => startResize("bottom", event)}
             title="Redimensionar zona inferior"
           >
-            <div className="h-px w-12 bg-line/70" />
+            <div className="h-0.5 w-14 rounded-full bg-line/70 transition group-hover:w-20 group-hover:bg-accent/55" />
           </div>
         ) : null}
 

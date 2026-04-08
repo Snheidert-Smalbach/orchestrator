@@ -1,6 +1,6 @@
 ﻿use tauri::{AppHandle, State};
 
-use crate::models::{Project, ProjectOrderUpdate, Snapshot, SystemDiagnostics};
+use crate::models::{Preset, Project, ProjectOrderUpdate, Snapshot, SystemDiagnostics};
 use crate::{db, diagnostics, runtime, scanner, AppState};
 
 fn map_error<T>(result: anyhow::Result<T>) -> Result<T, String> {
@@ -74,8 +74,47 @@ pub fn import_detected_projects(
 }
 
 #[tauri::command]
+pub fn import_single_project(
+    root_path: String,
+    preferred_env_file: Option<String>,
+    state: State<'_, AppState>,
+) -> Result<Snapshot, String> {
+    let imported_roots = map_error(db::list_project_root_paths(&state.db_path))?;
+    let detected = map_error(scanner::inspect_project(
+        &root_path,
+        &imported_roots,
+        preferred_env_file.as_deref(),
+    ))?;
+
+    if !detected.already_imported {
+        let project = Project::from_detected(&detected);
+        map_error(db::save_project(&state.db_path, &project))?;
+    }
+
+    if let Some(parent) = std::path::Path::new(&root_path).parent() {
+        if let Some(parent_str) = parent.to_str() {
+            map_error(db::save_default_root(&state.db_path, parent_str))?;
+        }
+    }
+
+    map_error(db::build_snapshot(&state.db_path))
+}
+
+#[tauri::command]
 pub fn save_project(project: Project, state: State<'_, AppState>) -> Result<Snapshot, String> {
     map_error(db::save_project(&state.db_path, &project))?;
+    map_error(db::build_snapshot(&state.db_path))
+}
+
+#[tauri::command]
+pub fn save_preset(preset: Preset, state: State<'_, AppState>) -> Result<Snapshot, String> {
+    map_error(db::save_preset(&state.db_path, &preset))?;
+    map_error(db::build_snapshot(&state.db_path))
+}
+
+#[tauri::command]
+pub fn delete_preset(preset_id: String, state: State<'_, AppState>) -> Result<Snapshot, String> {
+    map_error(db::delete_preset(&state.db_path, &preset_id))?;
     map_error(db::build_snapshot(&state.db_path))
 }
 

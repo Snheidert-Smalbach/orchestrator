@@ -1,7 +1,7 @@
-﻿import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Play, RefreshCw, Rocket, Save, Square, Trash2, TriangleAlert } from "lucide-react";
 import { inspectProject } from "../lib/tauri";
-import type { DetectedProject, Project, ProjectEnvOverride, ProjectResourceUsage } from "../lib/types";
+import type { DetectedProject, Preset, Project, ProjectEnvOverride, ProjectResourceUsage } from "../lib/types";
 import { StatusPill } from "./status-pill";
 
 type SaveOptions = {
@@ -15,6 +15,8 @@ type Props = {
   allProjects: Project[];
   canForceStop: boolean;
   canForceStart: boolean;
+  presets: Preset[];
+  onToggleProjectPreset: (presetId: string, projectId: string, enabled: boolean) => void;
   onSave: (project: Project, options?: SaveOptions) => Promise<void>;
   onStart: (projectId: string) => Promise<void>;
   onStop: (projectId: string) => Promise<void>;
@@ -127,6 +129,8 @@ export function ProjectDetail({
   allProjects,
   canForceStop,
   canForceStart,
+  presets,
+  onToggleProjectPreset,
   onSave,
   onStart,
   onStop,
@@ -306,8 +310,11 @@ export function ProjectDetail({
   }
 
   const otherProjects = allProjects.filter((entry) => entry.id !== draft.id);
+  const editablePresets = presets.filter((preset) => !preset.readOnly);
   const scriptOptions = buildScriptOptions(draft);
   const fieldClassName = "surface-chip w-full px-3 py-2 text-[13px] text-textStrong";
+  const showForceStopAction = canForceStop || ["starting", "running", "ready", "failed"].includes(draft.status);
+  const showForceStopWarning = canForceStop;
   const saveHint =
     saveState === "saving"
       ? "Guardando..."
@@ -356,7 +363,7 @@ export function ProjectDetail({
               El puerto configurado parece ocupado. Puedes usar Forzar e iniciar para liberar ese puerto y arrancar el servicio.
             </p>
           ) : null}
-          {canForceStop ? (
+          {showForceStopWarning ? (
             <p className="mt-1 inline-flex items-center gap-1.5 text-[11px] text-danger">
               <TriangleAlert className="h-3 w-3" />
               La detencion normal no libero el servicio. Puedes usar Forzar para matar el PID o liberar el puerto.
@@ -379,13 +386,13 @@ export function ProjectDetail({
           {canForceStart ? (
             <button className="inline-flex items-center gap-1.5 border border-warn/40 bg-warn/12 px-3 py-2 text-xs font-semibold text-warn" onClick={() => void onForceStart(draft.id)}><Rocket className="h-3.5 w-3.5" /> Forzar e iniciar</button>
           ) : null}
-          {!canForceStart && canForceStop ? (
+          {!canForceStart && showForceStopAction ? (
             <button className="inline-flex items-center gap-1.5 border border-danger/40 bg-danger/12 px-3 py-2 text-xs font-semibold text-danger" onClick={() => void onForceStop(draft.id)}><TriangleAlert className="h-3.5 w-3.5" /> Forzar</button>
           ) : null}
         </div>
       </div>
 
-      <div className="min-h-0 flex-1 overflow-auto"><div className="grid gap-3 p-4 xl:grid-cols-2">
+      <div className="min-h-0 flex-1 overflow-auto"><div className="grid gap-3 p-4 [grid-template-columns:repeat(auto-fit,minmax(180px,1fr))]">
         <label className="space-y-1.5">
           <span className="text-[10px] uppercase tracking-[0.16em] text-textSoft">Nombre</span>
           <input className={fieldClassName} value={draft.name} onChange={(event) => setDraft({ ...draft, name: event.target.value })} />
@@ -478,7 +485,7 @@ export function ProjectDetail({
             {draft.availableEnvFiles.map((envFile) => <option key={envFile} value={envFile}>{envFile}</option>)}
           </select>
         </label>
-        <div className="grid grid-cols-4 gap-2.5">
+        <div className="grid gap-2.5 [grid-template-columns:repeat(auto-fit,minmax(120px,1fr))]">
           <label className="space-y-1.5">
             <span className="text-[10px] uppercase tracking-[0.16em] text-textSoft">Puerto</span>
             <input
@@ -533,9 +540,9 @@ export function ProjectDetail({
             </select>
           </label>
         </div>
-        <div className="space-y-2 xl:col-span-2">
+        <div className="space-y-2 [grid-column:1/-1]">
           <span className="text-[10px] uppercase tracking-[0.16em] text-textSoft">Proceso</span>
-          <div className="surface-panel-soft grid gap-1.5 px-3 py-2 text-[12px] text-textStrong md:grid-cols-3">
+          <div className="surface-panel-soft grid gap-1.5 px-3 py-2 text-[12px] text-textStrong [grid-template-columns:repeat(auto-fit,minmax(140px,1fr))]">
             <div>
               <p className="text-[10px] uppercase tracking-[0.14em] text-textSoft">PID</p>
               <p>{resourceUsage?.trackedPid ?? "n/a"}</p>
@@ -548,7 +555,7 @@ export function ProjectDetail({
               <p className="text-[10px] uppercase tracking-[0.14em] text-textSoft">RAM</p>
               <p>{resourceUsage ? `${resourceUsage.totalWorkingSetMb.toFixed(1)} MB` : "n/a"}</p>
             </div>
-            <div className="min-w-0 md:col-span-3">
+            <div className="min-w-0 [grid-column:1/-1]">
               <p className="text-[10px] uppercase tracking-[0.14em] text-textSoft">Comando activo</p>
               <p className="truncate text-textMuted" title={resourceUsage?.commandPreview ?? "Sin proceso"}>
                 {resourceUsage?.commandPreview ?? "Sin proceso rastreado por el orchestrator"}
@@ -556,13 +563,13 @@ export function ProjectDetail({
             </div>
           </div>
         </div>
-        <label className="space-y-1.5 xl:col-span-2">
+        <label className="space-y-1.5 [grid-column:1/-1]">
           <span className="text-[10px] uppercase tracking-[0.16em] text-textSoft">Overrides</span>
           <textarea rows={5} className="surface-chip w-full px-3 py-2 text-[13px] text-textStrong" value={overridesText} onChange={(event) => setOverridesText(event.target.value)} />
         </label>
-        <div className="space-y-2 xl:col-span-2">
+        <div className="space-y-2 [grid-column:1/-1]">
           <span className="text-[10px] uppercase tracking-[0.16em] text-textSoft">Dependencias</span>
-          <div className="grid gap-1.5 md:grid-cols-2">
+          <div className="grid gap-1.5 [grid-template-columns:repeat(auto-fit,minmax(180px,1fr))]">
             {otherProjects.map((entry) => {
               const checked = draft.dependencies.some((dependency) => dependency.dependsOnProjectId === entry.id);
               return (
@@ -579,11 +586,38 @@ export function ProjectDetail({
             })}
           </div>
         </div>
-        <label className="surface-panel-soft flex items-center gap-2.5 px-3 py-2 text-[13px] text-textStrong xl:col-span-2">
+        <div className="space-y-2 [grid-column:1/-1]">
+          <span className="text-[10px] uppercase tracking-[0.16em] text-textSoft">Workspaces</span>
+          {editablePresets.length ? (
+            <div className="grid gap-1.5 [grid-template-columns:repeat(auto-fit,minmax(180px,1fr))]">
+              {editablePresets.map((preset) => {
+                const checked = preset.projectIds.includes(draft.id);
+                return (
+                  <label key={preset.id} className="surface-panel-soft flex items-center justify-between gap-3 px-3 py-2 text-[13px] text-textStrong">
+                    <span className="min-w-0">
+                      <span className="block truncate">{preset.name}</span>
+                      {preset.description ? <span className="block truncate text-[11px] text-textMuted">{preset.description}</span> : null}
+                    </span>
+                    <input
+                      type="checkbox"
+                      checked={checked}
+                      onChange={(event) => onToggleProjectPreset(preset.id, draft.id, event.target.checked)}
+                    />
+                  </label>
+                );
+              })}
+            </div>
+          ) : (
+            <div className="surface-panel-soft px-3 py-2 text-[12px] text-textMuted">
+              Crea un workspace para agrupar y ejecutar microservicios por pestanas.
+            </div>
+          )}
+        </div>
+        <label className="surface-panel-soft flex items-center gap-2.5 px-3 py-2 text-[13px] text-textStrong [grid-column:1/-1]">
           <input type="checkbox" checked={draft.enabled} onChange={(event) => setDraft({ ...draft, enabled: event.target.checked })} />
           Habilitado para acciones globales
         </label>
-        <label className="surface-panel-soft flex items-center gap-2.5 px-3 py-2 text-[13px] text-textStrong xl:col-span-2">
+        <label className="surface-panel-soft flex items-center gap-2.5 px-3 py-2 text-[13px] text-textStrong [grid-column:1/-1]">
           <input
             type="checkbox"
             checked={draft.waitForPreviousReady}

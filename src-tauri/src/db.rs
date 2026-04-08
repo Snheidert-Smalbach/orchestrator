@@ -86,6 +86,34 @@ fn ensure_project_columns(conn: &Connection) -> Result<()> {
     Ok(())
 }
 
+fn resolve_preset_sort_order(conn: &Connection, preset: &Preset) -> Result<i64> {
+    if preset.sort_order > 0 {
+        return Ok(preset.sort_order);
+    }
+
+    let existing_sort_order = conn
+        .query_row(
+            "SELECT sort_order FROM presets WHERE id = ?1",
+            [preset.id.as_str()],
+            |row| row.get::<_, i64>(0),
+        )
+        .optional()?;
+
+    if let Some(sort_order) = existing_sort_order {
+        if sort_order > 0 {
+            return Ok(sort_order);
+        }
+    }
+
+    let next_sort_order = conn.query_row(
+        "SELECT COALESCE(MAX(sort_order), 0) + 1 FROM presets",
+        [],
+        |row| row.get::<_, i64>(0),
+    )?;
+
+    Ok(next_sort_order)
+}
+
 fn resolve_catalog_order(conn: &Connection, project: &Project) -> Result<i64> {
     if project.catalog_order > 0 {
         return Ok(project.catalog_order);
@@ -162,6 +190,22 @@ pub fn init_db(db_path: &Path) -> Result<()> {
             project_id TEXT NOT NULL,
             depends_on_project_id TEXT NOT NULL,
             required_for_start INTEGER NOT NULL DEFAULT 1,
+            FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE CASCADE
+        );
+
+        CREATE TABLE IF NOT EXISTS presets (
+            id TEXT PRIMARY KEY,
+            name TEXT NOT NULL,
+            description TEXT NOT NULL DEFAULT '',
+            sort_order INTEGER NOT NULL DEFAULT 0
+        );
+
+        CREATE TABLE IF NOT EXISTS preset_projects (
+            preset_id TEXT NOT NULL,
+            project_id TEXT NOT NULL,
+            sort_order INTEGER NOT NULL DEFAULT 0,
+            PRIMARY KEY (preset_id, project_id),
+            FOREIGN KEY(preset_id) REFERENCES presets(id) ON DELETE CASCADE,
             FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE CASCADE
         );
         ",
@@ -256,6 +300,23 @@ fn load_dependencies(conn: &Connection, project_id: &str) -> Result<Vec<ProjectD
         dependencies.push(row?);
     }
     Ok(dependencies)
+}
+
+fn load_preset_project_ids(conn: &Connection, preset_id: &str) -> Result<Vec<String>> {
+    let mut statement = conn.prepare(
+        "SELECT project_id
+         FROM preset_projects
+         WHERE preset_id = ?1
+         ORDER BY sort_order, project_id",
+    )?;
+    let rows = statement.query_map([preset_id], |row| row.get::<_, String>(0))?;
+    let mut project_ids = Vec::new();
+
+    for row in rows {
+        project_ids.push(row?);
+    }
+
+    Ok(project_ids)
 }
 
 pub fn list_projects(db_path: &Path) -> Result<Vec<Project>> {
@@ -418,6 +479,70 @@ pub fn save_project(db_path: &Path, project: &Project) -> Result<()> {
     Ok(())
 }
 
+pub fn list_presets(db_path: &Path) -> Result<Vec<Preset>> {
+    let conn = open_connection(db_path)?;
+    let mut statement = conn.prepare(
+        "SELECT id, name, description, sort_order
+         FROM presets
+         ORDER BY sort_order, name",
+    )?;
+    let rows = statement.query_map([], |row| {
+        Ok(Preset {
+            id: row.get(0)?,
+            name: row.get(1)?,
+            description: row.get(2)?,
+            sort_order: row.get(3)?,
+            read_only: false,
+            project_ids: Vec::new(),
+        })
+    })?;
+
+    let mut presets = Vec::new();
+    for row in rows {
+        let mut preset = row?;
+        preset.project_ids = load_preset_project_ids(&conn, &preset.id)?;
+        presets.push(preset);
+    }
+
+    Ok(presets)
+}
+
+pub fn save_preset(db_path: &Path, preset: &Preset) -> Result<()> {
+    let conn = open_connection(db_path)?;
+    let sort_order = resolve_preset_sort_order(&conn, preset)?;
+
+    conn.execute(
+        "INSERT INTO presets (id, name, description, sort_order)
+         VALUES (?1, ?2, ?3, ?4)
+         ON CONFLICT(id) DO UPDATE SET
+            name = excluded.name,
+            description = excluded.description,
+            sort_order = excluded.sort_order",
+        params![preset.id, preset.name, preset.description, sort_order],
+    )?;
+
+    conn.execute(
+        "DELETE FROM preset_projects WHERE preset_id = ?1",
+        [preset.id.as_str()],
+    )?;
+
+    for (index, project_id) in preset.project_ids.iter().enumerate() {
+        conn.execute(
+            "INSERT INTO preset_projects (preset_id, project_id, sort_order)
+             VALUES (?1, ?2, ?3)",
+            params![preset.id, project_id, index as i64 + 1],
+        )?;
+    }
+
+    Ok(())
+}
+
+pub fn delete_preset(db_path: &Path, preset_id: &str) -> Result<()> {
+    let conn = open_connection(db_path)?;
+    conn.execute("DELETE FROM presets WHERE id = ?1", [preset_id])?;
+    Ok(())
+}
+
 pub fn reorder_projects(db_path: &Path, updates: &[ProjectOrderUpdate]) -> Result<()> {
     let mut conn = open_connection(db_path)?;
     let mut statement = conn.prepare(
@@ -487,20 +612,24 @@ pub fn update_project_status(
 pub fn build_snapshot(db_path: &Path) -> Result<Snapshot> {
     let settings = load_settings(db_path)?;
     let projects = list_projects(db_path)?;
-    let preset = Preset {
+    let system_preset = Preset {
         id: "all-enabled".to_string(),
         name: "Todos los habilitados".to_string(),
         description: "Ejecuta todos los proyectos habilitados".to_string(),
+        sort_order: 0,
+        read_only: true,
         project_ids: projects
             .iter()
             .filter(|project| project.enabled)
             .map(|project| project.id.clone())
             .collect(),
     };
+    let mut presets = vec![system_preset];
+    presets.extend(list_presets(db_path)?);
 
     Ok(Snapshot {
         settings,
         projects,
-        presets: vec![preset],
+        presets,
     })
 }

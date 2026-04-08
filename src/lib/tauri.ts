@@ -1,9 +1,10 @@
-﻿import { invoke } from "@tauri-apps/api/core";
+import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import type {
   DetectedProject,
   LogPayload,
   ProcessDiagnostic,
+  Preset,
   ProjectResourceUsage,
   ProjectOrderUpdate,
   RuntimeStatusPayload,
@@ -162,6 +163,17 @@ function toProject(detected: DetectedProject): Project {
   };
 }
 
+function createSystemPreset(projects: Project[]): Preset {
+  return {
+    id: "all-enabled",
+    name: "Todos",
+    description: "Ejecuta todos los proyectos habilitados.",
+    sortOrder: 0,
+    readOnly: true,
+    projectIds: projects.filter((project) => project.enabled).map((project) => project.id),
+  };
+}
+
 function loadMockSnapshot(): Snapshot {
   const raw = window.localStorage.getItem(STORAGE_KEY);
   if (raw) {
@@ -173,14 +185,7 @@ function loadMockSnapshot(): Snapshot {
       defaultRoots: [DEFAULT_ROOT],
     },
     projects: [],
-    presets: [
-      {
-        id: createId("preset"),
-        name: "Todos los habilitados",
-        description: "Ejecuta todos los proyectos habilitados.",
-        projectIds: [],
-      },
-    ],
+    presets: [],
   };
 
   const normalizedSnapshot = normalizeSnapshot(snapshot);
@@ -205,16 +210,20 @@ function emitLog(payload: LogPayload) {
 }
 
 function mergePresetIds(snapshot: Snapshot) {
+  const availableProjectIds = new Set(snapshot.projects.map((project) => project.id));
+  const userPresets = snapshot.presets
+    .filter((preset) => preset.id !== "all-enabled")
+    .sort((left, right) => left.sortOrder - right.sortOrder || left.name.localeCompare(right.name))
+    .map((preset, index) => ({
+      ...preset,
+      sortOrder: preset.sortOrder > 0 ? preset.sortOrder : index + 1,
+      readOnly: false,
+      projectIds: preset.projectIds.filter((projectId) => availableProjectIds.has(projectId)),
+    }));
+
   return {
     ...snapshot,
-    presets: snapshot.presets.map((preset, index) =>
-      index === 0
-        ? {
-            ...preset,
-            projectIds: snapshot.projects.filter((project) => project.enabled).map((project) => project.id),
-          }
-        : preset,
-    ),
+    presets: [createSystemPreset(snapshot.projects), ...userPresets],
   };
 }
 
@@ -273,6 +282,24 @@ export async function getRuntimeDiagnostics() {
   } satisfies SystemDiagnostics;
 }
 
+function isPathWithinScanRoot(projectRootPath: string, rootPath: string, recursive: boolean) {
+  const normalizedProject = projectRootPath.toLowerCase();
+  const normalizedRoot = rootPath.toLowerCase();
+
+  if (normalizedProject === normalizedRoot) {
+    return true;
+  }
+
+  const prefix = `${normalizedRoot}\\`;
+  if (!normalizedProject.startsWith(prefix)) {
+    return false;
+  }
+
+  const relative = normalizedProject.slice(prefix.length);
+  const segments = relative.split("\\").filter(Boolean);
+  return recursive ? segments.length <= 3 : segments.length === 1;
+}
+
 export async function scanRoot(rootPath: string, recursive: boolean) {
   if (isTauriRuntime()) {
     return invoke<DetectedProject[]>("scan_root", { rootPath, recursive });
@@ -282,12 +309,11 @@ export async function scanRoot(rootPath: string, recursive: boolean) {
   const importedRoots = new Set(snapshot.projects.map((project) => project.rootPath));
 
   return detectedSeed
-    .filter((project) => recursive || project.rootPath.split("\\").length === 5)
+    .filter((project) => isPathWithinScanRoot(project.rootPath, rootPath, recursive))
     .map((project) => ({
       ...project,
       alreadyImported: importedRoots.has(project.rootPath),
-    }))
-    .filter((project) => rootPath.includes("BACK"));
+    }));
 }
 
 export async function inspectProject(rootPath: string, preferredEnvFile?: string | null) {
@@ -352,6 +378,36 @@ export async function importDetectedProjects(
   return normalizedNext;
 }
 
+export async function importSingleProject(rootPath: string, preferredEnvFile?: string | null) {
+  if (isTauriRuntime()) {
+    return invoke<Snapshot>("import_single_project", {
+      rootPath,
+      preferredEnvFile: preferredEnvFile ?? null,
+    });
+  }
+
+  const detected = await inspectProject(rootPath, preferredEnvFile);
+  const snapshot = loadMockSnapshot();
+  if (snapshot.projects.some((project) => project.rootPath === detected.rootPath)) {
+    return mergePresetIds(snapshot);
+  }
+
+  const next = mergePresetIds({
+    ...snapshot,
+    settings: {
+      defaultRoots: [rootPath.split("\\").slice(0, -1).join("\\") || DEFAULT_ROOT],
+    },
+    projects: [...snapshot.projects, toProject(detected)].map((project, index) => ({
+      ...project,
+      catalogOrder: project.catalogOrder > 0 ? project.catalogOrder : index + 1,
+    })),
+  });
+
+  const normalizedNext = normalizeSnapshot(next);
+  saveMockSnapshot(normalizedNext);
+  return normalizedNext;
+}
+
 export async function saveProject(project: Project) {
   if (isTauriRuntime()) {
     return invoke<Snapshot>("save_project", { project });
@@ -372,6 +428,53 @@ export async function saveProject(project: Project) {
   const next = mergePresetIds({
     ...snapshot,
     projects: nextProjects,
+  });
+
+  const normalizedNext = normalizeSnapshot(next);
+  saveMockSnapshot(normalizedNext);
+  return normalizedNext;
+}
+
+export async function savePreset(preset: Preset) {
+  if (isTauriRuntime()) {
+    return invoke<Snapshot>("save_preset", { preset });
+  }
+
+  const snapshot = loadMockSnapshot();
+  const userPresets = snapshot.presets.filter((entry) => entry.id !== "all-enabled");
+  const nextSortOrder =
+    preset.sortOrder > 0
+      ? preset.sortOrder
+      : userPresets.reduce((max, entry) => Math.max(max, entry.sortOrder ?? 0), 0) + 1;
+  const index = userPresets.findIndex((entry) => entry.id === preset.id);
+  const nextPresets =
+    index >= 0
+      ? userPresets.map((entry) =>
+          entry.id === preset.id
+            ? { ...preset, sortOrder: nextSortOrder, readOnly: false }
+            : entry,
+        )
+      : [...userPresets, { ...preset, sortOrder: nextSortOrder, readOnly: false }];
+
+  const next = mergePresetIds({
+    ...snapshot,
+    presets: nextPresets,
+  });
+
+  const normalizedNext = normalizeSnapshot(next);
+  saveMockSnapshot(normalizedNext);
+  return normalizedNext;
+}
+
+export async function deletePreset(presetId: string) {
+  if (isTauriRuntime()) {
+    return invoke<Snapshot>("delete_preset", { presetId });
+  }
+
+  const snapshot = loadMockSnapshot();
+  const next = mergePresetIds({
+    ...snapshot,
+    presets: snapshot.presets.filter((preset) => preset.id !== presetId && preset.id !== "all-enabled"),
   });
 
   const normalizedNext = normalizeSnapshot(next);
@@ -580,16 +683,18 @@ export async function listenRuntimeEvents(
   };
 }
 
-export async function pickRootFromDialog() {
+export async function pickRootFromDialog(defaultPath?: string | null) {
+  const initialPath = defaultPath ?? DEFAULT_ROOT;
+
   if (!isTauriRuntime()) {
-    return DEFAULT_ROOT;
+    return initialPath;
   }
 
   const { open } = await import("@tauri-apps/plugin-dialog");
   const selection = await open({
     directory: true,
     multiple: false,
-    defaultPath: DEFAULT_ROOT,
+    defaultPath: initialPath,
   });
 
   if (Array.isArray(selection)) {

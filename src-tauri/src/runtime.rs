@@ -363,6 +363,34 @@ fn parse_windows_netstat_pids(output: &str, port: u16) -> Vec<u32> {
     pids
 }
 
+fn parse_ps_command_pids(output: &str, pattern: &str) -> Vec<u32> {
+    let normalized_pattern = pattern.to_ascii_lowercase();
+    let mut seen = HashSet::new();
+    let mut pids = Vec::new();
+
+    for line in output.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+
+        let mut parts = trimmed.splitn(2, char::is_whitespace);
+        let Some(pid) = parts.next().and_then(|value| value.trim().parse::<u32>().ok()) else {
+            continue;
+        };
+        let command = parts.next().unwrap_or_default().to_ascii_lowercase();
+        if command.contains(&normalized_pattern) && seen.insert(pid) {
+            pids.push(pid);
+        }
+    }
+
+    pids
+}
+
+fn escape_powershell_single_quotes(value: &str) -> String {
+    value.replace('\'', "''")
+}
+
 async fn find_pids_by_port(app: &AppHandle, project_id: &str, port: u16) -> Result<Vec<u32>> {
     if cfg!(windows) {
         let command_line = format!("netstat -ano | findstr :{port}");
@@ -395,6 +423,91 @@ async fn find_pids_by_port(app: &AppHandle, project_id: &str, port: u16) -> Resu
     }
 
     Ok(parse_pid_tokens(&stdout))
+}
+
+async fn find_pids_by_root_path(
+    app: &AppHandle,
+    project_id: &str,
+    root_path: &str,
+) -> Result<Vec<u32>> {
+    if cfg!(windows) {
+        let escaped_root = escape_powershell_single_quotes(root_path);
+        let script = format!(
+            "$root = '{escaped_root}'; Get-CimInstance Win32_Process | Where-Object {{ $_.ProcessId -ne $PID -and $_.CommandLine -and $_.CommandLine -like \"*$root*\" }} | Select-Object -ExpandProperty ProcessId"
+        );
+        emit_log(app, project_id, "system", format!("CMD powershell root-scan {}", root_path));
+        let output = Command::new("powershell.exe")
+            .arg("-NoProfile")
+            .arg("-Command")
+            .arg(script)
+            .output()
+            .await?;
+
+        let (stdout, stderr) = parse_command_output(&output);
+        if !output.status.success() && stdout.is_empty() && stderr.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        return Ok(parse_pid_tokens(&stdout));
+    }
+
+    let command_line = "ps -ax -o pid=,command=";
+    emit_log(app, project_id, "system", format!("CMD {command_line}"));
+    let output = Command::new("sh")
+        .arg("-lc")
+        .arg(command_line)
+        .output()
+        .await?;
+
+    let (stdout, stderr) = parse_command_output(&output);
+    if !output.status.success() && stdout.is_empty() && stderr.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    Ok(parse_ps_command_pids(&stdout, root_path))
+}
+
+async fn wait_for_project_process_release(app: &AppHandle, project: &Project) -> bool {
+    for _ in 0..8 {
+        let port_released = project.port.map(port_is_available).unwrap_or(true);
+        let root_released = find_pids_by_root_path(app, &project.id, &project.root_path)
+            .await
+            .map(|pids| pids.is_empty())
+            .unwrap_or(false);
+
+        if port_released && root_released {
+            return true;
+        }
+
+        sleep(Duration::from_millis(250)).await;
+    }
+
+    false
+}
+
+async fn stop_pid(app: &AppHandle, project_id: &str, pid: u32) -> Result<std::process::Output> {
+    if cfg!(windows) {
+        emit_log(
+            app,
+            project_id,
+            "system",
+            format!("CMD taskkill /PID {pid} /T"),
+        );
+        return Ok(
+            Command::new("taskkill")
+                .arg("/PID")
+                .arg(pid.to_string())
+                .arg("/T")
+                .output()
+                .await?,
+        );
+    }
+
+    emit_log(app, project_id, "system", format!("CMD kill {pid}"));
+    Ok(Command::new("kill")
+        .arg(pid.to_string())
+        .output()
+        .await?)
 }
 
 async fn force_kill_pid(app: &AppHandle, project_id: &str, pid: u32) -> Result<()> {
@@ -479,6 +592,14 @@ async fn force_stop_project(
         }
     }
 
+    let root_path_pids = find_pids_by_root_path(app, &project.id, &project.root_path).await?;
+    for pid in root_path_pids {
+        if attempted_pids.insert(pid) {
+            force_kill_pid(app, &project.id, pid).await?;
+            killed_anything = true;
+        }
+    }
+
     if !wait_for_port_release(project.port).await {
         return Err(anyhow!(
             "Port {} is still busy after force stop for {}",
@@ -487,9 +608,16 @@ async fn force_stop_project(
         ));
     }
 
+    if !wait_for_project_process_release(app, project).await {
+        return Err(anyhow!(
+            "Processes related to {} are still running after force stop",
+            project.name
+        ));
+    }
+
     if !killed_anything && tracked_pid.is_none() && project.port.is_none() {
         return Err(anyhow!(
-            "{} has no tracked pid or configured port to force stop",
+            "{} has no tracked pid, configured port or matching root-path processes to force stop",
             project.name
         ));
     }
@@ -1015,14 +1143,7 @@ pub async fn stop_selected(app: AppHandle, state: AppState, project_ids: Option<
 
         if let Some(running) = tracked_process {
             mark_stop_requested(&state, &project_id).await;
-            let output = match Command::new("taskkill")
-                .arg("/PID")
-                .arg(running.pid.to_string())
-                .arg("/T")
-                .arg("/F")
-                .output()
-                .await
-            {
+            let output = match stop_pid(&app, &project_id, running.pid).await {
                 Ok(output) => output,
                 Err(error) => {
                     clear_stop_requested(&state, &project_id).await;
@@ -1046,13 +1167,13 @@ pub async fn stop_selected(app: AppHandle, state: AppState, project_ids: Option<
             if output.status.success() || process_missing {
                 remove_running_process(&state, &project_id).await;
 
-                if !wait_for_port_release(project.and_then(|entry| entry.port)).await {
-                    if let Some(project) = project {
+                if let Some(project) = project {
+                    if !wait_for_project_process_release(&app, project).await {
                         emit_log(
                             &app,
                             &project_id,
                             "system",
-                            "Tracked PID stopped but port is still busy, escalating to force stop",
+                            "Tracked PID stopped but project processes are still alive, escalating to force stop",
                         );
                         match force_stop_project(&app, project, Some(running.pid)).await {
                             Ok(message) => {
@@ -1068,15 +1189,6 @@ pub async fn stop_selected(app: AppHandle, state: AppState, project_ids: Option<
                             }
                         }
                     }
-
-                    clear_stop_requested(&state, &project_id).await;
-                    let message = format!(
-                        "{} stopped its tracked PID, but the port is still busy and the project metadata is unavailable.",
-                        project_name
-                    );
-                    mark_project_stop_failure(&app, &state, &project_id, message.clone())?;
-                    failures.push(message);
-                    continue;
                 }
 
                 mark_project_stopped(
@@ -1127,12 +1239,12 @@ pub async fn stop_selected(app: AppHandle, state: AppState, project_ids: Option<
             Some(ProjectStatus::Starting | ProjectStatus::Running | ProjectStatus::Ready | ProjectStatus::Failed)
         ) {
             if let Some(project) = project {
-                if !wait_for_port_release(project.port).await {
+                if !wait_for_project_process_release(&app, project).await {
                     emit_log(
                         &app,
                         &project_id,
                         "system",
-                        "No tracked PID was found, escalating to force stop by port",
+                        "No tracked PID was found, escalating to force stop by port/root path",
                     );
                     match force_stop_project(&app, project, None).await {
                         Ok(message) => {

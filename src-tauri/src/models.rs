@@ -166,6 +166,8 @@ pub struct Preset {
     pub id: String,
     pub name: String,
     pub description: String,
+    pub sort_order: i64,
+    pub read_only: bool,
     pub project_ids: Vec<String>,
 }
 

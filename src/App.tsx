@@ -1,6 +1,7 @@
-﻿import { useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import {
   Boxes,
+  FolderPlus,
   FolderSearch,
   GitBranch,
   LoaderCircle,
@@ -13,6 +14,7 @@ import {
   Server,
   Square,
   SunMedium,
+  Trash2,
   TriangleAlert,
   Waves,
 } from "lucide-react";
@@ -189,7 +191,7 @@ function compactCommand(command: string) {
 }
 
 function describeNodeProcess(process: ProcessDiagnostic) {
-  return `PID ${process.pid} · ${formatMemory(process.workingSetMb)} · ${compactCommand(process.command)}`;
+  return `PID ${process.pid} Â· ${formatMemory(process.workingSetMb)} Â· ${compactCommand(process.command)}`;
 }
 
 function quickProfileIcon(profileId: string) {
@@ -227,10 +229,15 @@ function resolveInitialThemeFamily(): ThemeFamily {
   return isThemeFamily(saved) ? saved : DEFAULT_THEME_FAMILY;
 }
 
+function createWorkspaceId() {
+  return `workspace-${Math.random().toString(36).slice(2, 10)}`;
+}
+
 export default function App() {
   const settings = useAppStore((state) => state.settings);
   const projects = useAppStore((state) => state.projects);
   const presets = useAppStore((state) => state.presets);
+  const selectedPresetId = useAppStore((state) => state.selectedPresetId);
   const diagnostics = useAppStore((state) => state.diagnostics);
   const detectedProjects = useAppStore((state) => state.detectedProjects);
   const selectedProjectId = useAppStore((state) => state.selectedProjectId);
@@ -246,7 +253,11 @@ export default function App() {
   const setScanOpen = useAppStore((state) => state.setScanOpen);
   const scan = useAppStore((state) => state.scan);
   const importDetected = useAppStore((state) => state.importDetected);
+  const importProjectPath = useAppStore((state) => state.importProjectPath);
   const persistProject = useAppStore((state) => state.persistProject);
+  const persistPreset = useAppStore((state) => state.persistPreset);
+  const removePreset = useAppStore((state) => state.removePreset);
+  const selectPreset = useAppStore((state) => state.selectPreset);
   const reorderProjects = useAppStore((state) => state.reorderProjects);
   const removeProject = useAppStore((state) => state.removeProject);
   const start = useAppStore((state) => state.start);
@@ -259,6 +270,7 @@ export default function App() {
   const [themeMode, setThemeMode] = useState<ThemeMode>(resolveInitialThemeMode);
   const [themeFamily, setThemeFamily] = useState<ThemeFamily>(resolveInitialThemeFamily);
   const [isThemePickerOpen, setIsThemePickerOpen] = useState(false);
+  const [workspaceNameDraft, setWorkspaceNameDraft] = useState("");
   const themePickerRef = useRef<HTMLDivElement | null>(null);
   const hasActiveRuntimeProjects = projects.some(
     (project) => project.status === "starting" || project.status === "running" || project.status === "ready",
@@ -305,17 +317,96 @@ export default function App() {
     };
   }, [isThemePickerOpen]);
 
-  const selectedProject = projects.find((project) => project.id === selectedProjectId) ?? null;
-  const conflictedProjectIds = detectPortConflicts(projects);
+  const selectedPreset = presets.find((preset) => preset.id === selectedPresetId) ?? presets[0] ?? null;
+  const scopedProjectIds = selectedPreset && !selectedPreset.readOnly ? selectedPreset.projectIds : null;
+  const visibleProjects = scopedProjectIds
+    ? projects.filter((project) => scopedProjectIds.includes(project.id))
+    : projects;
+
+  useEffect(() => {
+    const nextSelectedProjectId =
+      visibleProjects.find((project) => project.id === selectedProjectId)?.id ??
+      visibleProjects[0]?.id ??
+      null;
+
+    if (nextSelectedProjectId !== selectedProjectId) {
+      selectProject(nextSelectedProjectId);
+    }
+  }, [selectProject, selectedProjectId, visibleProjects]);
+
+  const selectedProject = visibleProjects.find((project) => project.id === selectedProjectId) ?? null;
+  const conflictedProjectIds = detectPortConflicts(visibleProjects);
   const projectResources = toProjectResourceMap(diagnostics?.projectResources);
   const runningCount = projects.filter((project) => project.status === "running" || project.status === "ready").length;
   const enabledCount = projects.filter((project) => project.enabled).length;
   const defaultRoot = settings.defaultRoots[0] ?? "C:\\workspace\\apps\\BACK";
   const activeTheme = THEME_DEFINITIONS.find((theme) => theme.id === themeFamily) ?? THEME_DEFINITIONS[0];
-  const quickProfiles = buildQuickProfiles(projects, selectedProjectId);
+  const quickProfiles = buildQuickProfiles(visibleProjects, selectedProject?.id ?? selectedProjectId);
   const freeMemoryTone = diagnostics && diagnostics.freePhysicalMemoryMb < 4096 ? "text-danger" : "text-textStrong";
   const topExternalNodes = diagnostics?.untrackedNodeProcesses.slice(0, 3) ?? [];
   const trackedWorkingSetMb = diagnostics?.projectResources.reduce((sum, entry) => sum + entry.totalNodeWorkingSetMb, 0) ?? 0;
+
+  async function handleCreateWorkspace() {
+    const name = workspaceNameDraft.trim();
+    if (!name) {
+      return;
+    }
+
+    await persistPreset({
+      id: createWorkspaceId(),
+      name,
+      description: selectedProject ? `Workspace para ${selectedProject.name}` : "",
+      sortOrder: presets.filter((preset) => !preset.readOnly).length + 1,
+      readOnly: false,
+      projectIds: selectedProject ? [selectedProject.id] : [],
+    });
+    setWorkspaceNameDraft("");
+  }
+
+  async function handleToggleProjectPreset(presetId: string, projectId: string, enabled: boolean) {
+    const preset = presets.find((entry) => entry.id === presetId);
+    if (!preset || preset.readOnly) {
+      return;
+    }
+
+    const projectIds = enabled
+      ? [...new Set([...preset.projectIds, projectId])]
+      : preset.projectIds.filter((entry) => entry !== projectId);
+
+    await persistPreset({
+      ...preset,
+      projectIds,
+    });
+  }
+
+  function shouldFallbackToScan(error: unknown) {
+    const message = error instanceof Error ? error.message : String(error ?? "");
+    const normalized = message.toLowerCase();
+
+    return normalized.includes("no supported project metadata found") || normalized.includes("no se encontro metadata");
+  }
+
+  async function handleImportOrScanPath(rootPath: string) {
+    try {
+      await importProjectPath(rootPath);
+    } catch (error) {
+      if (shouldFallbackToScan(error)) {
+        await scan(rootPath, false);
+        return;
+      }
+
+      throw error;
+    }
+  }
+
+  async function handleImportProjectFromCatalog() {
+    const selectedPath = await pickRootFromDialog(defaultRoot);
+    if (!selectedPath) {
+      return;
+    }
+
+    await handleImportOrScanPath(selectedPath);
+  }
 
   return (
     <div className="h-screen overflow-hidden px-2 py-2 text-textStrong">
@@ -438,18 +529,18 @@ export default function App() {
                 <button
                   type="button"
                   className="inline-flex items-center gap-1.5 border border-ok/40 bg-ok/12 px-2 py-1.5 text-[11px] font-semibold text-ok"
-                  onClick={() => void start()}
+                  onClick={() => void start(scopedProjectIds ?? undefined)}
                 >
                   <Play className="h-3 w-3" />
-                  Iniciar habilitados
+                  {selectedPreset && !selectedPreset.readOnly ? `Iniciar ${selectedPreset.name}` : "Iniciar habilitados"}
                 </button>
                 <button
                   type="button"
                   className="surface-chip inline-flex items-center gap-1.5 px-2 py-1.5 text-[11px] font-semibold text-textStrong"
-                  onClick={() => void stop()}
+                  onClick={() => void stop(scopedProjectIds ?? undefined)}
                 >
                   <Square className="h-3 w-3" />
-                  Detener todo
+                  {selectedPreset && !selectedPreset.readOnly ? `Detener ${selectedPreset.name}` : "Detener todo"}
                 </button>
                 <button
                   type="button"
@@ -459,6 +550,14 @@ export default function App() {
                   <RefreshCw className="h-3 w-3" />
                   Recursos
                 </button>
+                <button
+                  type="button"
+                  className="inline-flex items-center gap-1.5 border border-danger/40 bg-danger/12 px-2 py-1.5 text-[11px] font-semibold text-danger"
+                  onClick={() => void forceStop(scopedProjectIds ?? undefined)}
+                >
+                  <TriangleAlert className="h-3 w-3" />
+                  {selectedPreset && !selectedPreset.readOnly ? `Forzar ${selectedPreset.name}` : "Forzar detencion"}
+                </button>
                 {forceStartProjectIds.length ? (
                   <button
                     type="button"
@@ -467,16 +566,6 @@ export default function App() {
                   >
                     <Rocket className="h-3 w-3" />
                     Forzar e iniciar ({forceStartProjectIds.length})
-                  </button>
-                ) : null}
-                {forceStopProjectIds.length ? (
-                  <button
-                    type="button"
-                    className="inline-flex items-center gap-1.5 border border-danger/40 bg-danger/12 px-2 py-1.5 text-[11px] font-semibold text-danger"
-                    onClick={() => void forceStop()}
-                  >
-                    <TriangleAlert className="h-3 w-3" />
-                    Forzar detencion ({forceStopProjectIds.length})
                   </button>
                 ) : null}
               </div>
@@ -514,6 +603,64 @@ export default function App() {
             ) : null}
           </div>
 
+          <div className="surface-panel-soft mt-2 px-2 py-2">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-[9px] uppercase tracking-[0.2em] text-textSoft">Workspaces</span>
+              <div className="flex min-w-0 flex-1 flex-wrap gap-1">
+                {presets.map((preset) => (
+                  <button
+                    key={preset.id}
+                    type="button"
+                    className={[
+                      "border px-2 py-1 text-[10px] font-semibold transition",
+                      preset.id === selectedPresetId
+                        ? "border-accent/40 bg-accent/10 text-accent"
+                        : "surface-chip text-textMuted hover:bg-panelSoft/80",
+                    ].join(" ")}
+                    onClick={() => selectPreset(preset.id)}
+                    title={`${preset.name} (${preset.projectIds.length})`}
+                  >
+                    {preset.name}
+                    <span className="ml-1 text-[9px] text-textSoft">{preset.projectIds.length}</span>
+                  </button>
+                ))}
+              </div>
+              {!selectedPreset?.readOnly ? (
+                <button
+                  type="button"
+                  className="inline-flex items-center gap-1 border border-danger/35 bg-danger/10 px-2 py-1 text-[10px] font-semibold text-danger"
+                  onClick={() => void removePreset(selectedPreset.id)}
+                  title="Eliminar workspace"
+                >
+                  <Trash2 className="h-3 w-3" />
+                  Cerrar tab
+                </button>
+              ) : null}
+            </div>
+            <div className="mt-2 flex flex-wrap items-center gap-2">
+              <input
+                className="surface-chip min-w-[220px] flex-1 px-3 py-2 text-[11px] text-textStrong"
+                placeholder="Nuevo workspace"
+                value={workspaceNameDraft}
+                onChange={(event) => setWorkspaceNameDraft(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") {
+                    event.preventDefault();
+                    void handleCreateWorkspace();
+                  }
+                }}
+              />
+              <button
+                type="button"
+                className="inline-flex items-center gap-1.5 border border-accent/40 bg-accent/10 px-3 py-2 text-[11px] font-semibold text-accent"
+                onClick={() => void handleCreateWorkspace()}
+              >
+                <FolderPlus className="h-3.5 w-3.5" />
+                Crear workspace
+              </button>
+            </div>
+          </div>
+
           {quickProfiles.length ? (
             <div className="surface-panel-soft mt-2 px-2 py-1">
               <div className="flex flex-wrap items-center gap-1">
@@ -525,7 +672,7 @@ export default function App() {
                       key={profile.id}
                       type="button"
                       className="relative inline-flex h-7 w-7 items-center justify-center border border-accent/35 bg-accent/10 text-accent transition hover:bg-accent/16"
-                      title={`${profile.label} (${profile.projectIds.length}) · ${profile.description}`}
+                      title={`${profile.label} (${profile.projectIds.length}) Â· ${profile.description}`}
                       onClick={() => void start(profile.projectIds)}
                     >
                       <Icon className="h-3.5 w-3.5" />
@@ -568,7 +715,7 @@ export default function App() {
 
         <div className="min-h-0 flex-1 overflow-hidden">
           <WorkspaceLayout
-            projects={projects}
+            projects={visibleProjects}
             selectedProjectId={selectedProjectId}
             conflictedProjectIds={conflictedProjectIds}
             forceStopProjectIds={forceStopProjectIds}
@@ -576,6 +723,7 @@ export default function App() {
             projectResources={projectResources}
             selectedProject={selectedProject}
             selectedProjectMessage={selectedProjectMessage}
+            presets={presets}
             onSelectProject={selectProject}
             onToggleEnabled={(project, enabled) => void persistProject({ ...project, enabled })}
             onToggleWaitForPreviousReady={(project, enabled) =>
@@ -586,8 +734,13 @@ export default function App() {
             onStopProject={(projectId) => void stop([projectId])}
             onForceStopProject={(projectId) => void forceStop([projectId])}
             onForceStartProject={(projectId) => void forceStart([projectId])}
+            onImportProject={handleImportProjectFromCatalog}
+            onOpenScanDialog={() => setScanOpen(true)}
             onSaveProject={persistProject}
             onDeleteProject={removeProject}
+            onDeleteProjectFromList={(projectId) => void removeProject(projectId)}
+            onToggleProjectPreset={(presetId, projectId, enabled) => void handleToggleProjectPreset(presetId, projectId, enabled)}
+            isBusy={isBusy}
           />
         </div>
       </div>
@@ -598,9 +751,10 @@ export default function App() {
         defaultRoot={defaultRoot}
         detectedProjects={detectedProjects}
         onOpenChange={setScanOpen}
-        onPickRoot={pickRootFromDialog}
+        onPickRoot={(initialPath) => pickRootFromDialog(initialPath ?? defaultRoot)}
         onScan={scan}
         onImport={importDetected}
+        onImportSingle={(rootPath) => handleImportOrScanPath(rootPath)}
       />
 
       {isLoading ? (

@@ -1,13 +1,16 @@
 ﻿import { create } from "zustand";
 import {
+  deletePreset,
   deleteProject,
   forceStopProjects,
   getDefaultRoot,
   getRuntimeDiagnostics,
   getSnapshot,
   importDetectedProjects,
+  importSingleProject,
   listenRuntimeEvents,
   reorderProjects as reorderProjectsInBackend,
+  savePreset,
   saveProject,
   scanRoot,
   startProjects,
@@ -45,6 +48,7 @@ interface AppStore {
   runtimeMessages: RuntimeMessageState;
   forceStopProjectIds: string[];
   forceStartProjectIds: string[];
+  selectedPresetId: string;
   selectedProjectId: string | null;
   isLoading: boolean;
   isBusy: boolean;
@@ -57,7 +61,11 @@ interface AppStore {
   setScanOpen: (open: boolean) => void;
   scan: (rootPath?: string, recursive?: boolean) => Promise<void>;
   importDetected: (rootPath: string, recursive: boolean, selectedRootPaths?: string[]) => Promise<void>;
+  importProjectPath: (rootPath: string, preferredEnvFile?: string | null) => Promise<void>;
   persistProject: (project: Project, options?: PersistProjectOptions) => Promise<void>;
+  persistPreset: (preset: Preset) => Promise<void>;
+  removePreset: (presetId: string) => Promise<void>;
+  selectPreset: (presetId: string) => void;
   reorderProjects: (orderedProjectIds: string[]) => Promise<void>;
   removeProject: (projectId: string) => Promise<void>;
   start: (projectIds?: string[]) => Promise<void>;
@@ -151,7 +159,7 @@ function isForceStartCandidateStatus(status: Project["status"]) {
 }
 
 function resolveStopTargetIds(projects: Project[], projectIds?: string[]) {
-  if (projectIds?.length) {
+  if (projectIds !== undefined) {
     return projectIds;
   }
 
@@ -161,7 +169,7 @@ function resolveStopTargetIds(projects: Project[], projectIds?: string[]) {
 }
 
 function resolveForceStopTargetIds(projects: Project[], forceStopProjectIds: string[], projectIds?: string[]) {
-  if (projectIds?.length) {
+  if (projectIds !== undefined) {
     return projectIds;
   }
 
@@ -175,7 +183,7 @@ function resolveForceStopTargetIds(projects: Project[], forceStopProjectIds: str
 }
 
 function resolveForceStartTargetIds(projects: Project[], forceStartProjectIds: string[], projectIds?: string[]) {
-  if (projectIds?.length) {
+  if (projectIds !== undefined) {
     return projectIds;
   }
 
@@ -236,6 +244,10 @@ function errorMessage(error: unknown, fallback: string) {
   return fallback;
 }
 
+function resolveSelectedPresetId(presets: Preset[], currentPresetId?: string | null) {
+  return presets.find((preset) => preset.id === currentPresetId)?.id ?? presets[0]?.id ?? "all-enabled";
+}
+
 export const useAppStore = create<AppStore>((set, get) => ({
   settings: defaultSettings,
   projects: [],
@@ -247,6 +259,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
   runtimeMessages: {},
   forceStopProjectIds: [],
   forceStartProjectIds: [],
+  selectedPresetId: "all-enabled",
   selectedProjectId: null,
   isLoading: false,
   isBusy: false,
@@ -306,6 +319,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
         getSnapshot(),
         getRuntimeDiagnostics().catch(() => null),
       ]);
+      const selectedPresetId = resolveSelectedPresetId(snapshot.presets, get().selectedPresetId);
       const selectedProjectId =
         snapshot.projects.find((project) => project.id === get().selectedProjectId)?.id ??
         snapshot.projects[0]?.id ??
@@ -315,6 +329,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
         projects: snapshot.projects,
         presets: snapshot.presets,
         diagnostics,
+        selectedPresetId,
         selectedProjectId,
         forceStopProjectIds: state.forceStopProjectIds.filter((projectId) =>
           snapshot.projects.some(
@@ -343,6 +358,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
       // keep the latest successful diagnostics visible in the UI
     }
   },
+  selectPreset: (presetId) => set({ selectedPresetId: presetId }),
   selectProject: (projectId) => set({ selectedProjectId: projectId }),
   setScanOpen: (open) => set({ isScanOpen: open }),
   scan: async (rootPath, recursive = false) => {
@@ -367,6 +383,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
         settings: snapshot.settings,
         projects: snapshot.projects,
         presets: snapshot.presets,
+        selectedPresetId: resolveSelectedPresetId(snapshot.presets, get().selectedPresetId),
         detectedProjects: [],
         isScanOpen: false,
         selectedProjectId: get().selectedProjectId ?? snapshot.projects[0]?.id ?? null,
@@ -375,6 +392,28 @@ export const useAppStore = create<AppStore>((set, get) => ({
       set({
         error: errorMessage(error, "No fue posible importar los proyectos detectados."),
       });
+    } finally {
+      set({ isBusy: false });
+    }
+  },
+  importProjectPath: async (rootPath, preferredEnvFile) => {
+    set({ isBusy: true, error: null });
+    try {
+      const snapshot = await importSingleProject(rootPath, preferredEnvFile);
+      const importedProject = snapshot.projects.find((project) => project.rootPath === rootPath);
+      set({
+        settings: snapshot.settings,
+        projects: snapshot.projects,
+        presets: snapshot.presets,
+        selectedPresetId: resolveSelectedPresetId(snapshot.presets, get().selectedPresetId),
+        isScanOpen: false,
+        selectedProjectId: importedProject?.id ?? get().selectedProjectId ?? snapshot.projects[0]?.id ?? null,
+      });
+    } catch (error) {
+      set({
+        error: errorMessage(error, "No fue posible importar el proyecto seleccionado."),
+      });
+      throw error;
     } finally {
       set({ isBusy: false });
     }
@@ -392,6 +431,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
         settings: snapshot.settings,
         projects: snapshot.projects,
         presets: snapshot.presets,
+        selectedPresetId: resolveSelectedPresetId(snapshot.presets, get().selectedPresetId),
         selectedProjectId: project.id,
       });
     } catch (error) {
@@ -403,6 +443,44 @@ export const useAppStore = create<AppStore>((set, get) => ({
       if (!options?.quiet) {
         set({ isBusy: false });
       }
+    }
+  },
+  persistPreset: async (preset) => {
+    set({ isBusy: true, error: null });
+    try {
+      const snapshot = await savePreset(preset);
+      set({
+        settings: snapshot.settings,
+        projects: snapshot.projects,
+        presets: snapshot.presets,
+        selectedPresetId: resolveSelectedPresetId(snapshot.presets, preset.id),
+      });
+    } catch (error) {
+      set({
+        error: errorMessage(error, "No fue posible guardar el workspace."),
+      });
+      throw error;
+    } finally {
+      set({ isBusy: false });
+    }
+  },
+  removePreset: async (presetId) => {
+    set({ isBusy: true, error: null });
+    try {
+      const snapshot = await deletePreset(presetId);
+      set({
+        settings: snapshot.settings,
+        projects: snapshot.projects,
+        presets: snapshot.presets,
+        selectedPresetId: resolveSelectedPresetId(snapshot.presets, get().selectedPresetId === presetId ? null : get().selectedPresetId),
+      });
+    } catch (error) {
+      set({
+        error: errorMessage(error, "No fue posible eliminar el workspace."),
+      });
+      throw error;
+    } finally {
+      set({ isBusy: false });
     }
   },
   reorderProjects: async (orderedProjectIds) => {
@@ -420,6 +498,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
         settings: snapshot.settings,
         projects: snapshot.projects,
         presets: snapshot.presets,
+        selectedPresetId: resolveSelectedPresetId(snapshot.presets, get().selectedPresetId),
       });
     } catch (error) {
       const message = errorMessage(error, "No fue posible guardar el nuevo orden del catalogo.");
@@ -429,6 +508,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
           settings: snapshot.settings,
           projects: snapshot.projects,
           presets: snapshot.presets,
+          selectedPresetId: resolveSelectedPresetId(snapshot.presets, get().selectedPresetId),
           error: message,
         });
       } catch {
@@ -447,6 +527,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
         settings: snapshot.settings,
         projects: snapshot.projects,
         presets: snapshot.presets,
+        selectedPresetId: resolveSelectedPresetId(snapshot.presets, get().selectedPresetId),
         selectedProjectId:
           get().selectedProjectId === projectId
             ? snapshot.projects[0]?.id ?? null
@@ -464,7 +545,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
     }
   },
   start: async (projectIds) => {
-    const targetIds = projectIds?.length
+    const targetIds = projectIds !== undefined
       ? projectIds
       : get().projects.filter((project) => project.enabled).map((project) => project.id);
 
@@ -479,6 +560,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
         settings: snapshot.settings,
         projects: snapshot.projects,
         presets: snapshot.presets,
+        selectedPresetId: resolveSelectedPresetId(snapshot.presets, get().selectedPresetId),
         forceStopProjectIds: excludeIds(state.forceStopProjectIds, targetIds),
         forceStartProjectIds: excludeIds(state.forceStartProjectIds, targetIds),
       }));
@@ -502,6 +584,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
           settings: snapshot.settings,
           projects: snapshot.projects,
           presets: snapshot.presets,
+          selectedPresetId: resolveSelectedPresetId(snapshot.presets, get().selectedPresetId),
           error: message,
           forceStartProjectIds: mergeIds(
             excludeIds(state.forceStartProjectIds, targetIds),
@@ -537,6 +620,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
         settings: snapshot.settings,
         projects: snapshot.projects,
         presets: snapshot.presets,
+        selectedPresetId: resolveSelectedPresetId(snapshot.presets, get().selectedPresetId),
         forceStopProjectIds: excludeIds(state.forceStopProjectIds, targetIds),
         forceStartProjectIds: excludeIds(state.forceStartProjectIds, targetIds),
       }));
@@ -561,6 +645,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
           settings: snapshot.settings,
           projects: snapshot.projects,
           presets: snapshot.presets,
+          selectedPresetId: resolveSelectedPresetId(snapshot.presets, get().selectedPresetId),
           error: message,
           forceStopProjectIds: mergeIds(excludeIds(state.forceStopProjectIds, targetIds), forceStopIds),
           forceStartProjectIds: excludeIds(state.forceStartProjectIds, targetIds),
@@ -595,6 +680,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
         settings: snapshot.settings,
         projects: snapshot.projects,
         presets: snapshot.presets,
+        selectedPresetId: resolveSelectedPresetId(snapshot.presets, get().selectedPresetId),
         forceStopProjectIds: excludeIds(state.forceStopProjectIds, targetIds),
         forceStartProjectIds: excludeIds(state.forceStartProjectIds, targetIds),
       }));
@@ -619,6 +705,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
           settings: snapshot.settings,
           projects: snapshot.projects,
           presets: snapshot.presets,
+          selectedPresetId: resolveSelectedPresetId(snapshot.presets, get().selectedPresetId),
           error: message,
           forceStopProjectIds: mergeIds(
             excludeIds(state.forceStopProjectIds, targetIds),
@@ -657,6 +744,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
         settings: snapshot.settings,
         projects: snapshot.projects,
         presets: snapshot.presets,
+        selectedPresetId: resolveSelectedPresetId(snapshot.presets, get().selectedPresetId),
         forceStopProjectIds: excludeIds(state.forceStopProjectIds, targetIds),
         forceStartProjectIds: excludeIds(state.forceStartProjectIds, targetIds),
       }));
@@ -679,6 +767,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
           settings: snapshot.settings,
           projects: snapshot.projects,
           presets: snapshot.presets,
+          selectedPresetId: resolveSelectedPresetId(snapshot.presets, get().selectedPresetId),
           error: message,
           forceStopProjectIds: excludeIds(state.forceStopProjectIds, targetIds),
           forceStartProjectIds: mergeIds(

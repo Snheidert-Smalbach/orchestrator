@@ -74,6 +74,8 @@ export interface Preset {
   id: string;
   name: string;
   description: string;
+  sortOrder: number;
+  readOnly: boolean;
   projectIds: string[];
 }
 

@@ -243,6 +243,34 @@ fn inspect_directory(
     }))
 }
 
+fn collect_scan_candidates(root: &Path, recursive: bool) -> Result<Vec<PathBuf>> {
+    let mut candidates = vec![root.to_path_buf()];
+
+    if recursive {
+        for entry in WalkDir::new(root)
+            .min_depth(1)
+            .max_depth(3)
+            .into_iter()
+            .filter_entry(|entry| !is_ignored_dir(entry.path()))
+        {
+            let entry = entry?;
+            if entry.file_type().is_dir() {
+                candidates.push(entry.into_path());
+            }
+        }
+    } else {
+        for entry in fs::read_dir(root)? {
+            let entry = entry?;
+            let path = entry.path();
+            if path.is_dir() {
+                candidates.push(path);
+            }
+        }
+    }
+
+    Ok(candidates)
+}
+
 pub fn scan_root(root_path: &str, recursive: bool, imported_roots: &HashSet<String>) -> Result<Vec<DetectedProject>> {
     let root = PathBuf::from(root_path);
     if !root.exists() {
@@ -250,25 +278,11 @@ pub fn scan_root(root_path: &str, recursive: bool, imported_roots: &HashSet<Stri
     }
 
     let mut detected = Vec::new();
+    let mut seen_roots = HashSet::new();
 
-    if recursive {
-        for entry in WalkDir::new(&root).min_depth(1).max_depth(3) {
-            let entry = entry?;
-            if !entry.file_type().is_dir() {
-                continue;
-            }
-            if let Some(project) = inspect_directory(entry.path(), imported_roots, None)? {
-                detected.push(project);
-            }
-        }
-    } else {
-        for entry in fs::read_dir(&root)? {
-            let entry = entry?;
-            let path = entry.path();
-            if !path.is_dir() {
-                continue;
-            }
-            if let Some(project) = inspect_directory(&path, imported_roots, None)? {
+    for candidate in collect_scan_candidates(&root, recursive)? {
+        if let Some(project) = inspect_directory(&candidate, imported_roots, None)? {
+            if seen_roots.insert(project.root_path.clone()) {
                 detected.push(project);
             }
         }
