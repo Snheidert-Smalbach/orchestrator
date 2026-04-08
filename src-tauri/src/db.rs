@@ -4,8 +4,9 @@ use anyhow::Result;
 use rusqlite::{params, Connection, OptionalExtension};
 
 use crate::models::{
-    PackageManager, Preset, Project, ProjectDependency, ProjectEnvOverride, ProjectOrderUpdate,
-    ProjectStatus, ReadinessMode, RunMode, RuntimeKind, Settings, Snapshot,
+    LaunchMode, MockMatchMode, PackageManager, Preset, Project, ProjectDependency,
+    ProjectEnvOverride, ProjectOrderUpdate, ProjectStatus, ReadinessMode, RunMode, RuntimeKind,
+    Settings, Snapshot,
 };
 
 const DEFAULT_ROOT: &str = "C:\\workspace\\apps\\BACK";
@@ -65,6 +66,27 @@ fn ensure_project_columns(conn: &Connection) -> Result<()> {
     if !columns.contains("wait_for_previous_ready") {
         conn.execute(
             "ALTER TABLE projects ADD COLUMN wait_for_previous_ready INTEGER NOT NULL DEFAULT 0",
+            [],
+        )?;
+    }
+
+    if !columns.contains("launch_mode") {
+        conn.execute(
+            "ALTER TABLE projects ADD COLUMN launch_mode TEXT NOT NULL DEFAULT 'service'",
+            [],
+        )?;
+    }
+
+    if !columns.contains("mock_match_mode") {
+        conn.execute(
+            "ALTER TABLE projects ADD COLUMN mock_match_mode TEXT NOT NULL DEFAULT 'auto'",
+            [],
+        )?;
+    }
+
+    if !columns.contains("mock_unmatched_status") {
+        conn.execute(
+            "ALTER TABLE projects ADD COLUMN mock_unmatched_status INTEGER NOT NULL DEFAULT 404",
             [],
         )?;
     }
@@ -166,6 +188,9 @@ pub fn init_db(db_path: &Path) -> Result<()> {
             port INTEGER,
             readiness_mode TEXT NOT NULL,
             readiness_value TEXT,
+            launch_mode TEXT NOT NULL DEFAULT 'service',
+            mock_match_mode TEXT NOT NULL DEFAULT 'auto',
+            mock_unmatched_status INTEGER NOT NULL DEFAULT 404,
             startup_phase INTEGER NOT NULL DEFAULT 1,
             catalog_order INTEGER NOT NULL DEFAULT 0,
             wait_for_previous_ready INTEGER NOT NULL DEFAULT 0,
@@ -337,6 +362,9 @@ pub fn list_projects(db_path: &Path) -> Result<Vec<Project>> {
             port,
             readiness_mode,
             readiness_value,
+            launch_mode,
+            mock_match_mode,
+            mock_unmatched_status,
             startup_phase,
             catalog_order,
             wait_for_previous_ready,
@@ -351,7 +379,7 @@ pub fn list_projects(db_path: &Path) -> Result<Vec<Project>> {
     let rows = statement.query_map([], |row| {
         let available_env_files: String = row.get(9)?;
         let available_scripts: String = row.get(10)?;
-        let tags_json: String = row.get(18)?;
+        let tags_json: String = row.get(21)?;
         Ok(Project {
             id: row.get(0)?,
             name: row.get(1)?,
@@ -367,15 +395,18 @@ pub fn list_projects(db_path: &Path) -> Result<Vec<Project>> {
             port: row.get::<_, Option<u16>>(11)?,
             readiness_mode: ReadinessMode::from_db(&row.get::<_, String>(12)?),
             readiness_value: row.get(13)?,
-            startup_phase: row.get(14)?,
-            catalog_order: row.get(15)?,
-            wait_for_previous_ready: row.get::<_, i64>(16)? == 1,
-            enabled: row.get::<_, i64>(17)? == 1,
+            launch_mode: LaunchMode::from_db(&row.get::<_, String>(14)?),
+            mock_match_mode: MockMatchMode::from_db(&row.get::<_, String>(15)?),
+            mock_unmatched_status: row.get::<_, u16>(16)?,
+            startup_phase: row.get(17)?,
+            catalog_order: row.get(18)?,
+            wait_for_previous_ready: row.get::<_, i64>(19)? == 1,
+            enabled: row.get::<_, i64>(20)? == 1,
             tags: serde_json::from_str(&tags_json).unwrap_or_default(),
             env_overrides: Vec::new(),
             dependencies: Vec::new(),
-            status: ProjectStatus::from_db(&row.get::<_, String>(19)?),
-            last_exit_code: row.get(20)?,
+            status: ProjectStatus::from_db(&row.get::<_, String>(22)?),
+            last_exit_code: row.get(23)?,
         })
     })?;
 
@@ -397,9 +428,10 @@ pub fn save_project(db_path: &Path, project: &Project) -> Result<()> {
         "INSERT INTO projects (
             id, name, root_path, runtime_kind, package_manager, run_mode, run_target, shell,
             selected_env_file, available_env_files_json, available_scripts_json, port,
-            readiness_mode, readiness_value, startup_phase, catalog_order, wait_for_previous_ready,
-            enabled, tags_json, last_status, last_exit_code
-         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21)
+            readiness_mode, readiness_value, launch_mode, mock_match_mode, mock_unmatched_status,
+            startup_phase, catalog_order, wait_for_previous_ready, enabled, tags_json,
+            last_status, last_exit_code
+         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24)
          ON CONFLICT(id) DO UPDATE SET
             name = excluded.name,
             root_path = excluded.root_path,
@@ -414,6 +446,9 @@ pub fn save_project(db_path: &Path, project: &Project) -> Result<()> {
             port = excluded.port,
             readiness_mode = excluded.readiness_mode,
             readiness_value = excluded.readiness_value,
+            launch_mode = excluded.launch_mode,
+            mock_match_mode = excluded.mock_match_mode,
+            mock_unmatched_status = excluded.mock_unmatched_status,
             startup_phase = excluded.startup_phase,
             catalog_order = excluded.catalog_order,
             wait_for_previous_ready = excluded.wait_for_previous_ready,
@@ -436,6 +471,9 @@ pub fn save_project(db_path: &Path, project: &Project) -> Result<()> {
             project.port,
             project.readiness_mode.as_str(),
             project.readiness_value,
+            project.launch_mode.as_str(),
+            project.mock_match_mode.as_str(),
+            project.mock_unmatched_status,
             project.startup_phase,
             catalog_order,
             if project.wait_for_previous_ready { 1 } else { 0 },
@@ -446,7 +484,10 @@ pub fn save_project(db_path: &Path, project: &Project) -> Result<()> {
         ],
     )?;
 
-    conn.execute("DELETE FROM project_env_overrides WHERE project_id = ?1", [project.id.as_str()])?;
+    conn.execute(
+        "DELETE FROM project_env_overrides WHERE project_id = ?1",
+        [project.id.as_str()],
+    )?;
     for override_entry in &project.env_overrides {
         conn.execute(
             "INSERT INTO project_env_overrides (id, project_id, key, value, is_secret, enabled)
@@ -462,7 +503,10 @@ pub fn save_project(db_path: &Path, project: &Project) -> Result<()> {
         )?;
     }
 
-    conn.execute("DELETE FROM project_dependencies WHERE project_id = ?1", [project.id.as_str()])?;
+    conn.execute(
+        "DELETE FROM project_dependencies WHERE project_id = ?1",
+        [project.id.as_str()],
+    )?;
     for dependency in &project.dependencies {
         conn.execute(
             "INSERT INTO project_dependencies (id, project_id, depends_on_project_id, required_for_start)
@@ -564,7 +608,9 @@ pub fn reorder_projects(db_path: &Path, updates: &[ProjectOrderUpdate]) -> Resul
     sorted_updates.sort_by_key(|entry| entry.catalog_order);
 
     for update in &sorted_updates {
-        if existing_ids.iter().any(|project_id| project_id == &update.project_id)
+        if existing_ids
+            .iter()
+            .any(|project_id| project_id == &update.project_id)
             && seen.insert(update.project_id.clone())
         {
             ordered_ids.push(update.project_id.clone());

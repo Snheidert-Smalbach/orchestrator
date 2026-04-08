@@ -2,6 +2,8 @@ export type RuntimeKind = "node" | "docker_compose" | "unknown";
 export type PackageManager = "npm" | "pnpm" | "yarn" | "cargo" | "unknown";
 export type RunMode = "script" | "command";
 export type ReadinessMode = "none" | "delay" | "port";
+export type LaunchMode = "service" | "record" | "mock" | "unknown";
+export type MockMatchMode = "auto" | "strict" | "path" | "unknown";
 export type ProjectStatus =
   | "idle"
   | "starting"
@@ -44,6 +46,9 @@ export interface Project {
   port: number | null;
   readinessMode: ReadinessMode;
   readinessValue: string | null;
+  launchMode: LaunchMode;
+  mockMatchMode: MockMatchMode;
+  mockUnmatchedStatus: number;
   startupPhase: number;
   catalogOrder: number;
   waitForPreviousReady: boolean;

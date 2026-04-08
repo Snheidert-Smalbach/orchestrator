@@ -1,4 +1,6 @@
+import * as Dialog from "@radix-ui/react-dialog";
 import {
+  Boxes,
   ChevronDown,
   ChevronRight,
   FolderPlus,
@@ -10,8 +12,9 @@ import {
   Square,
   Trash2,
   TriangleAlert,
+  X,
 } from "lucide-react";
-import { Fragment, useEffect, useState } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
 import type { Project, ProjectResourceUsage } from "../lib/types";
 import { StatusPill } from "./status-pill";
 
@@ -33,6 +36,10 @@ interface ProjectListProps {
   onDeleteProject: (projectId: string) => void;
   onImportProject: () => Promise<void>;
   onOpenScanDialog: () => void;
+  onBulkStartVisible: () => void;
+  onBulkStartVisibleAsMode: (launchMode: Project["launchMode"]) => void;
+  onBulkStopVisible: () => void;
+  onBulkForceStopVisible: () => void;
   isBusy: boolean;
 }
 
@@ -52,6 +59,13 @@ const markerToneByStatus: Record<Project["status"], string> = {
   ready: "bg-ok shadow-[0_0_14px_rgba(34,197,94,0.4)]",
   stopped: "bg-line/55",
   failed: "bg-danger shadow-[0_0_16px_rgba(248,113,113,0.42)]",
+};
+
+const launchModeLabel: Record<Project["launchMode"], string> = {
+  service: "service",
+  record: "record",
+  mock: "mock",
+  unknown: "unknown",
 };
 
 function buildRowStyle(options: {
@@ -95,6 +109,57 @@ function buildRowStyle(options: {
   };
 }
 
+const bulkActions: Array<{
+  id: string;
+  label: string;
+  description: string;
+  tone: string;
+  onRun: (props: Pick<ProjectListProps, "onBulkStartVisible" | "onBulkStartVisibleAsMode" | "onBulkStopVisible" | "onBulkForceStopVisible">) => void;
+}> = [
+  {
+    id: "start-visible",
+    label: "Iniciar visibles",
+    description: "Arranca los proyectos visibles con el modo que ya tenga cada uno.",
+    tone: "border-ok/35 bg-ok/12 text-ok",
+    onRun: ({ onBulkStartVisible }) => onBulkStartVisible(),
+  },
+  {
+    id: "start-service",
+    label: "Iniciar como service",
+    description: "Guarda service para los visibles y luego los arranca en lote.",
+    tone: "border-accent/35 bg-accent/10 text-accent",
+    onRun: ({ onBulkStartVisibleAsMode }) => onBulkStartVisibleAsMode("service"),
+  },
+  {
+    id: "start-record",
+    label: "Iniciar como record",
+    description: "Guarda record para los visibles y los levanta grabando trafico.",
+    tone: "border-warn/35 bg-warn/12 text-warn",
+    onRun: ({ onBulkStartVisibleAsMode }) => onBulkStartVisibleAsMode("record"),
+  },
+  {
+    id: "start-mock",
+    label: "Iniciar como mock",
+    description: "Guarda mock para los visibles y los levanta respondiendo desde capturas.",
+    tone: "border-accent/35 bg-accent/10 text-accent",
+    onRun: ({ onBulkStartVisibleAsMode }) => onBulkStartVisibleAsMode("mock"),
+  },
+  {
+    id: "stop-visible",
+    label: "Detener visibles",
+    description: "Solicita el stop normal para todos los proyectos visibles del catalogo.",
+    tone: "border-line bg-panelSoft/70 text-textStrong",
+    onRun: ({ onBulkStopVisible }) => onBulkStopVisible(),
+  },
+  {
+    id: "force-visible",
+    label: "Forzar visibles",
+    description: "Ejecuta detencion forzada sobre los proyectos visibles cuando haga falta.",
+    tone: "border-danger/35 bg-danger/12 text-danger",
+    onRun: ({ onBulkForceStopVisible }) => onBulkForceStopVisible(),
+  },
+];
+
 export function ProjectList({
   projects,
   selectedProjectId,
@@ -113,13 +178,18 @@ export function ProjectList({
   onDeleteProject,
   onImportProject,
   onOpenScanDialog,
+  onBulkStartVisible,
+  onBulkStartVisibleAsMode,
+  onBulkStopVisible,
+  onBulkForceStopVisible,
   isBusy,
 }: ProjectListProps) {
   const [expandedProjectIds, setExpandedProjectIds] = useState<Record<string, boolean>>({});
   const [draggedProjectId, setDraggedProjectId] = useState<string | null>(null);
   const [dropTarget, setDropTarget] = useState<{ projectId: string; position: "before" | "after" } | null>(null);
-  const forceStopSet = new Set(forceStopProjectIds);
-  const forceStartSet = new Set(forceStartProjectIds);
+  const [isBulkDialogOpen, setIsBulkDialogOpen] = useState(false);
+  const forceStopSet = useMemo(() => new Set(forceStopProjectIds), [forceStopProjectIds]);
+  const forceStartSet = useMemo(() => new Set(forceStartProjectIds), [forceStartProjectIds]);
 
   function toggleExpanded(projectId: string) {
     setExpandedProjectIds((current) => ({
@@ -229,6 +299,16 @@ export function ProjectList({
           <button
             type="button"
             className="surface-chip inline-flex items-center gap-1.5 px-2 py-1.5 text-[10px] font-semibold text-textStrong"
+            onClick={() => setIsBulkDialogOpen(true)}
+            disabled={!projects.length || isBusy}
+            title="Acciones masivas sobre los proyectos visibles del catalogo"
+          >
+            <Boxes className="h-3.5 w-3.5" />
+            Lote
+          </button>
+          <button
+            type="button"
+            className="surface-chip inline-flex items-center gap-1.5 px-2 py-1.5 text-[10px] font-semibold text-textStrong"
             onClick={onOpenScanDialog}
             disabled={isBusy}
             title="Escanear una carpeta base e importar varios servicios"
@@ -246,9 +326,7 @@ export function ProjectList({
             {isBusy ? <LoaderCircle className="h-3.5 w-3.5 animate-spin" /> : <FolderPlus className="h-3.5 w-3.5" />}
             Agregar carpeta
           </button>
-          <span className="surface-chip px-2 py-1 text-[10px] text-textMuted">
-            {projects.length} proyectos
-          </span>
+          <span className="surface-chip px-2 py-1 text-[10px] text-textMuted">{projects.length} visibles</span>
         </div>
       </div>
 
@@ -341,6 +419,9 @@ export function ProjectList({
                           <div className="flex min-w-0 items-center gap-1.5">
                             <span className={["h-5 w-1.5 shrink-0", markerToneByStatus[project.status]].join(" ")} />
                             <p className="truncate text-[11px] font-semibold leading-4 text-textStrong">{project.name}</p>
+                            <span className="surface-chip shrink-0 px-1.5 py-0.5 text-[9px] uppercase tracking-[0.14em] text-textMuted">
+                              {launchModeLabel[project.launchMode]}
+                            </span>
                             {hasConflict ? <TriangleAlert className="h-3.5 w-3.5 shrink-0 text-warn" /> : null}
                             {canForceStart ? <Rocket className="h-3.5 w-3.5 shrink-0 text-warn" /> : null}
                             {!canForceStart && showForceStopWarning ? <TriangleAlert className="h-3.5 w-3.5 shrink-0 text-danger" /> : null}
@@ -452,8 +533,8 @@ export function ProjectList({
                           </div>
                           <div className="min-w-0">
                             <p className="text-[9px] uppercase tracking-[0.14em] text-textSoft">Arranque</p>
-                            <p className="truncate text-textMuted" title={`Orden ${project.catalogOrder} Ãƒâ€šÃ‚Â· fase ${project.startupPhase}`}>
-                              #{project.catalogOrder} / fase {project.startupPhase} / {project.waitForPreviousReady ? "espera ready del anterior" : "sin espera"}
+                            <p className="truncate text-textMuted" title={`Orden ${project.catalogOrder} � fase ${project.startupPhase}`}>
+                              #{project.catalogOrder} / fase {project.startupPhase} / {project.launchMode} / {project.waitForPreviousReady ? "espera ready del anterior" : "sin espera"}
                             </p>
                           </div>
                           <div className="min-w-0">
@@ -476,6 +557,48 @@ export function ProjectList({
           </tbody>
         </table>
       </div>
+
+      <Dialog.Root open={isBulkDialogOpen} onOpenChange={setIsBulkDialogOpen}>
+        <Dialog.Portal>
+          <Dialog.Overlay className="fixed inset-0 z-40 bg-ink/62 backdrop-blur-sm" />
+          <Dialog.Content className="surface-panel fixed left-1/2 top-1/2 z-50 max-h-[82vh] w-[min(760px,92vw)] -translate-x-1/2 -translate-y-1/2 overflow-hidden">
+            <div className="surface-divider flex items-center justify-between px-5 py-4">
+              <div>
+                <Dialog.Title className="text-[15px] font-semibold text-textStrong">Acciones del catalogo</Dialog.Title>
+                <Dialog.Description className="mt-1 text-[11px] text-textMuted">
+                  Ejecuta cambios masivos sobre los {projects.length} proyectos visibles sin ir uno por uno.
+                </Dialog.Description>
+              </div>
+              <Dialog.Close className="surface-chip p-2 text-textStrong transition hover:bg-panelSoft">
+                <X className="h-4 w-4" />
+              </Dialog.Close>
+            </div>
+
+            <div className="grid gap-2 p-5 md:grid-cols-2">
+              {bulkActions.map((action) => (
+                <button
+                  key={action.id}
+                  type="button"
+                  className={["border px-3 py-3 text-left transition hover:-translate-y-0", action.tone].join(" ")}
+                  onClick={() => {
+                    setIsBulkDialogOpen(false);
+                    action.onRun({
+                      onBulkStartVisible,
+                      onBulkStartVisibleAsMode,
+                      onBulkStopVisible,
+                      onBulkForceStopVisible,
+                    });
+                  }}
+                  disabled={!projects.length || isBusy}
+                >
+                  <span className="block text-[11px] font-semibold uppercase tracking-[0.12em]">{action.label}</span>
+                  <span className="mt-1 block text-[11px] leading-5 text-current/80">{action.description}</span>
+                </button>
+              ))}
+            </div>
+          </Dialog.Content>
+        </Dialog.Portal>
+      </Dialog.Root>
     </div>
   );
 }

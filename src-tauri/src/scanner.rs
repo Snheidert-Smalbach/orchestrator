@@ -80,7 +80,12 @@ fn parse_env_entries(path: &str) -> Vec<(String, String)> {
     fs::read_to_string(path)
         .ok()
         .into_iter()
-        .flat_map(|content| content.lines().filter_map(parse_env_line).collect::<Vec<_>>())
+        .flat_map(|content| {
+            content
+                .lines()
+                .filter_map(parse_env_line)
+                .collect::<Vec<_>>()
+        })
         .collect()
 }
 
@@ -98,7 +103,14 @@ fn extract_port(env_file: Option<&String>) -> Option<u16> {
     let file = env_file?;
     let entries = parse_env_entries(file);
 
-    for key in ["PORT", "APP_PORT", "SERVER_PORT", "SERVICE_PORT", "HTTP_PORT", "HTTPS_PORT"] {
+    for key in [
+        "PORT",
+        "APP_PORT",
+        "SERVER_PORT",
+        "SERVICE_PORT",
+        "HTTP_PORT",
+        "HTTPS_PORT",
+    ] {
         if let Some((_, value)) = entries
             .iter()
             .find(|(entry_key, _)| entry_key.eq_ignore_ascii_case(key))
@@ -165,7 +177,11 @@ fn parse_package_json(path: &Path) -> Result<(String, Vec<String>)> {
     Ok((name, scripts))
 }
 
-fn choose_run_target(scripts: &[String], has_package_json: bool, has_compose: bool) -> (RunMode, String) {
+fn choose_run_target(
+    scripts: &[String],
+    has_package_json: bool,
+    has_compose: bool,
+) -> (RunMode, String) {
     for candidate in ["start:local", "start:localenv", "start", "start:dev"] {
         if scripts.iter().any(|script| script == candidate) {
             return (RunMode::Script, candidate.to_string());
@@ -271,7 +287,11 @@ fn collect_scan_candidates(root: &Path, recursive: bool) -> Result<Vec<PathBuf>>
     Ok(candidates)
 }
 
-pub fn scan_root(root_path: &str, recursive: bool, imported_roots: &HashSet<String>) -> Result<Vec<DetectedProject>> {
+pub fn scan_root(
+    root_path: &str,
+    recursive: bool,
+    imported_roots: &HashSet<String>,
+) -> Result<Vec<DetectedProject>> {
     let root = PathBuf::from(root_path);
     if !root.exists() {
         return Err(anyhow!("Root path does not exist: {}", root_path));
@@ -305,5 +325,3 @@ pub fn inspect_project(
     inspect_directory(&path, imported_roots, preferred_env_file)?
         .ok_or_else(|| anyhow!("No supported project metadata found at {}", root_path))
 }
-
-

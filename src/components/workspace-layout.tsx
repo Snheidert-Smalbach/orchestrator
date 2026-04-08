@@ -42,6 +42,10 @@ type Props = {
   onForceStartProject: (projectId: string) => void;
   onImportProject: () => Promise<void>;
   onOpenScanDialog: () => void;
+  onBulkStartVisible: () => void;
+  onBulkStartVisibleAsMode: (launchMode: Project["launchMode"]) => void;
+  onBulkStopVisible: () => void;
+  onBulkForceStopVisible: () => void;
   onSaveProject: (project: Project, options?: { quiet?: boolean }) => Promise<void>;
   onDeleteProject: (projectId: string) => Promise<void>;
   onDeleteProjectFromList: (projectId: string) => void;
@@ -240,6 +244,10 @@ export function WorkspaceLayout({
   onForceStartProject,
   onImportProject,
   onOpenScanDialog,
+  onBulkStartVisible,
+  onBulkStartVisibleAsMode,
+  onBulkStopVisible,
+  onBulkForceStopVisible,
   onSaveProject,
   onDeleteProject,
   onDeleteProjectFromList,
@@ -362,6 +370,10 @@ export function WorkspaceLayout({
           onDeleteProject={onDeleteProjectFromList}
           onImportProject={onImportProject}
           onOpenScanDialog={onOpenScanDialog}
+          onBulkStartVisible={onBulkStartVisible}
+          onBulkStartVisibleAsMode={onBulkStartVisibleAsMode}
+          onBulkStopVisible={onBulkStopVisible}
+          onBulkForceStopVisible={onBulkForceStopVisible}
           isBusy={isBusy}
         />
       ),
@@ -394,6 +406,10 @@ export function WorkspaceLayout({
       onForceStartProject,
       onImportProject,
       onOpenScanDialog,
+      onBulkStartVisible,
+      onBulkStartVisibleAsMode,
+      onBulkStopVisible,
+      onBulkForceStopVisible,
       onDeleteProjectFromList,
       onReorderProjects,
       onSaveProject,
@@ -624,14 +640,6 @@ export function WorkspaceLayout({
               </button>
             );
           })}
-          <span className={[
-            "ml-1 hidden text-[9px] uppercase tracking-[0.14em] lg:inline",
-            dragPanelId ? "text-accent" : "text-textSoft",
-          ].join(" ")}>
-            {dragPanelId
-              ? `Suelta ${panelLabels[dragPanelId]} en la zona que quieras`
-              : "Arrastra paneles y usa los separadores para redimensionar"}
-          </span>
         </div>
         <div className="flex shrink-0 items-center gap-1">
           <button

@@ -1,7 +1,9 @@
-﻿mod commands;
+mod commands;
 mod db;
 mod diagnostics;
+mod mocking;
 mod models;
+mod process_control;
 mod runtime;
 mod scanner;
 
@@ -32,7 +34,10 @@ fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
-            let app_dir = app.path().app_data_dir().context("failed to resolve app data dir")?;
+            let app_dir = app
+                .path()
+                .app_data_dir()
+                .context("failed to resolve app data dir")?;
             std::fs::create_dir_all(&app_dir)?;
             let db_path = app_dir.join("orchestrator.sqlite");
             db::init_db(&db_path)?;

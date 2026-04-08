@@ -40,6 +40,9 @@ function normalizeProject(project: Project, index: number): Project {
     ...project,
     catalogOrder: project.catalogOrder && project.catalogOrder > 0 ? project.catalogOrder : index + 1,
     waitForPreviousReady: project.waitForPreviousReady ?? false,
+    launchMode: project.launchMode ?? "service",
+    mockMatchMode: project.mockMatchMode ?? "auto",
+    mockUnmatchedStatus: project.mockUnmatchedStatus ?? 404,
   };
 }
 
@@ -151,6 +154,9 @@ function toProject(detected: DetectedProject): Project {
     port: detected.suggestedPort,
     readinessMode: detected.suggestedPort ? "port" : "none",
     readinessValue: detected.suggestedPort ? String(detected.suggestedPort) : null,
+    launchMode: "service",
+    mockMatchMode: "auto",
+    mockUnmatchedStatus: 404,
     startupPhase: 1,
     catalogOrder: 0,
     waitForPreviousReady: false,
@@ -707,6 +713,7 @@ export async function pickRootFromDialog(defaultPath?: string | null) {
 export function getDefaultRoot() {
   return DEFAULT_ROOT;
 }
+
 
 
 

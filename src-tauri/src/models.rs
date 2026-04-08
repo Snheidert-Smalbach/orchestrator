@@ -46,6 +46,20 @@ enum_codec!(ReadinessMode {
     Unknown => "unknown"
 });
 
+enum_codec!(LaunchMode {
+    Service => "service",
+    Record => "record",
+    Mock => "mock",
+    Unknown => "unknown"
+});
+
+enum_codec!(MockMatchMode {
+    Auto => "auto",
+    Strict => "strict",
+    Path => "path",
+    Unknown => "unknown"
+});
+
 enum_codec!(ProjectStatus {
     Idle => "idle",
     Starting => "starting",
@@ -98,6 +112,9 @@ pub struct Project {
     pub port: Option<u16>,
     pub readiness_mode: ReadinessMode,
     pub readiness_value: Option<String>,
+    pub launch_mode: LaunchMode,
+    pub mock_match_mode: MockMatchMode,
+    pub mock_unmatched_status: u16,
     pub startup_phase: i64,
     pub catalog_order: i64,
     pub wait_for_previous_ready: bool,
@@ -147,6 +164,9 @@ impl Project {
                 ReadinessMode::None
             },
             readiness_value: detected.suggested_port.map(|port| port.to_string()),
+            launch_mode: LaunchMode::Service,
+            mock_match_mode: MockMatchMode::Auto,
+            mock_unmatched_status: 404,
             startup_phase: 1,
             catalog_order: 0,
             wait_for_previous_ready: false,

@@ -204,7 +204,21 @@ pub async fn collect_system_diagnostics(state: AppState) -> Result<SystemDiagnos
             continue;
         };
 
-        let subtree = collect_descendant_pids(entry.pid, &children_by_parent);
+        let Some(root_pid) = entry.pid else {
+            project_resources.push(ProjectResourceUsage {
+                project_id: project.id.clone(),
+                project_name: project.name.clone(),
+                tracked_pid: None,
+                total_processes: 0,
+                total_node_processes: 0,
+                total_working_set_mb: 0.0,
+                total_node_working_set_mb: 0.0,
+                command_preview: entry.command_preview.clone(),
+            });
+            continue;
+        };
+
+        let subtree = collect_descendant_pids(root_pid, &children_by_parent);
         let subtree_processes = subtree
             .iter()
             .filter_map(|pid| processes_by_pid.get(pid))
@@ -232,17 +246,20 @@ pub async fn collect_system_diagnostics(state: AppState) -> Result<SystemDiagnos
 
         let command_preview = node_processes
             .first()
-            .map(|process| compact_command(process.command_line.as_deref(), process.name.as_deref()))
+            .map(|process| {
+                compact_command(process.command_line.as_deref(), process.name.as_deref())
+            })
             .or_else(|| {
-                subtree_processes
-                    .first()
-                    .map(|process| compact_command(process.command_line.as_deref(), process.name.as_deref()))
-            });
+                subtree_processes.first().map(|process| {
+                    compact_command(process.command_line.as_deref(), process.name.as_deref())
+                })
+            })
+            .or_else(|| entry.command_preview.clone());
 
         project_resources.push(ProjectResourceUsage {
             project_id: project.id.clone(),
             project_name: project.name.clone(),
-            tracked_pid: Some(entry.pid),
+            tracked_pid: Some(root_pid),
             total_processes: subtree_processes.len() as u32,
             total_node_processes: node_processes.len() as u32,
             total_working_set_mb: round_one(total_working_set_mb),
@@ -266,10 +283,7 @@ pub async fn collect_system_diagnostics(state: AppState) -> Result<SystemDiagnos
             project_id: tracked_project_by_pid.get(&process.process_id).cloned(),
             pid: process.process_id,
             parent_pid: process.parent_process_id,
-            name: process
-                .name
-                .clone()
-                .unwrap_or_else(|| "node".to_string()),
+            name: process.name.clone().unwrap_or_else(|| "node".to_string()),
             command: compact_command(process.command_line.as_deref(), process.name.as_deref()),
             working_set_mb: round_one(working_set_mb(process)),
         })

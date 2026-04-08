@@ -36,6 +36,8 @@ const LOG_FLUSH_INTERVAL_MS = 80;
 let queuedLogPayloads: LogPayload[] = [];
 let flushQueuedLogs: (() => void) | null = null;
 let queuedLogTimer: ReturnType<typeof setTimeout> | null = null;
+let runtimeEventsUnlisten: (() => void) | null = null;
+let runtimeEventsPromise: Promise<void> | null = null;
 
 interface AppStore {
   settings: Settings;
@@ -248,6 +250,30 @@ function resolveSelectedPresetId(presets: Preset[], currentPresetId?: string | n
   return presets.find((preset) => preset.id === currentPresetId)?.id ?? presets[0]?.id ?? "all-enabled";
 }
 
+function ensureRuntimeSubscriptions(getStore: () => AppStore) {
+  if (runtimeEventsUnlisten) {
+    return Promise.resolve();
+  }
+
+  if (!runtimeEventsPromise) {
+    runtimeEventsPromise = listenRuntimeEvents(
+      (payload) => {
+        getStore().applyRuntimeStatus(payload);
+      },
+      (payload) => queueLogPayload(payload),
+    )
+      .then((unlisten) => {
+        runtimeEventsUnlisten = unlisten;
+      })
+      .catch((error) => {
+        runtimeEventsPromise = null;
+        throw error;
+      });
+  }
+
+  return runtimeEventsPromise;
+}
+
 export const useAppStore = create<AppStore>((set, get) => ({
   settings: defaultSettings,
   projects: [],
@@ -298,21 +324,10 @@ export const useAppStore = create<AppStore>((set, get) => ({
     set({ isLoading: true, error: null });
     try {
       if (!get().subscriptionsReady) {
-        await listenRuntimeEvents(
-          (payload) => {
-            get().applyRuntimeStatus(payload);
-            if (payload.message) {
-              get().appendLog({
-                projectId: payload.projectId,
-                stream: payload.status === "failed" ? "stderr" : "system",
-                line: payload.message,
-                timestamp: new Date().toISOString(),
-              });
-            }
-          },
-          (payload) => queueLogPayload(payload),
-        );
-        set({ subscriptionsReady: true });
+        await ensureRuntimeSubscriptions(get);
+        if (!get().subscriptionsReady) {
+          set({ subscriptionsReady: true });
+        }
       }
 
       const [snapshot, diagnostics] = await Promise.all([

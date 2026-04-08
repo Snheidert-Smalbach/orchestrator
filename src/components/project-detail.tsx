@@ -313,6 +313,7 @@ export function ProjectDetail({
   const editablePresets = presets.filter((preset) => !preset.readOnly);
   const scriptOptions = buildScriptOptions(draft);
   const fieldClassName = "surface-chip w-full px-3 py-2 text-[13px] text-textStrong";
+  const compactFieldClassName = "surface-chip w-full px-2.5 py-1.5 text-[12px] text-textStrong";
   const showForceStopAction = canForceStop || ["starting", "running", "ready", "failed"].includes(draft.status);
   const showForceStopWarning = canForceStop;
   const saveHint =
@@ -485,12 +486,12 @@ export function ProjectDetail({
             {draft.availableEnvFiles.map((envFile) => <option key={envFile} value={envFile}>{envFile}</option>)}
           </select>
         </label>
-        <div className="grid gap-2.5 [grid-template-columns:repeat(auto-fit,minmax(120px,1fr))]">
-          <label className="space-y-1.5">
-            <span className="text-[10px] uppercase tracking-[0.16em] text-textSoft">Puerto</span>
+        <div className="surface-panel-soft grid gap-2 px-3 py-2.5 [grid-column:1/-1] [grid-template-columns:repeat(auto-fit,minmax(150px,1fr))]">
+          <label className="grid items-center gap-2 [grid-template-columns:auto_minmax(0,1fr)]">
+            <span className="text-[10px] uppercase tracking-[0.16em] text-textSoft whitespace-nowrap">Puerto</span>
             <input
               type="number"
-              className={fieldClassName}
+              className={compactFieldClassName}
               value={draft.port ?? ""}
               onChange={(event) => {
                 const nextPort = event.target.value ? Number(event.target.value) : null;
@@ -507,18 +508,18 @@ export function ProjectDetail({
               }}
             />
           </label>
-          <label className="space-y-1.5">
-            <span className="text-[10px] uppercase tracking-[0.16em] text-textSoft">Fase</span>
-            <input type="number" className={fieldClassName} value={draft.startupPhase} onChange={(event) => setDraft({ ...draft, startupPhase: Number(event.target.value || 1) })} />
+          <label className="grid items-center gap-2 [grid-template-columns:auto_minmax(0,1fr)]">
+            <span className="text-[10px] uppercase tracking-[0.16em] text-textSoft whitespace-nowrap">Fase</span>
+            <input type="number" className={compactFieldClassName} value={draft.startupPhase} onChange={(event) => setDraft({ ...draft, startupPhase: Number(event.target.value || 1) })} />
           </label>
-          <label className="space-y-1.5">
-            <span className="text-[10px] uppercase tracking-[0.16em] text-textSoft">Orden</span>
-            <input type="number" className={fieldClassName} value={draft.catalogOrder} disabled />
+          <label className="grid items-center gap-2 [grid-template-columns:auto_minmax(0,1fr)]">
+            <span className="text-[10px] uppercase tracking-[0.16em] text-textSoft whitespace-nowrap">Orden</span>
+            <input type="number" className={compactFieldClassName} value={draft.catalogOrder} disabled />
           </label>
-          <label className="space-y-1.5">
-            <span className="text-[10px] uppercase tracking-[0.16em] text-textSoft">Ready</span>
+          <label className="grid items-center gap-2 [grid-template-columns:auto_minmax(0,1fr)]">
+            <span className="text-[10px] uppercase tracking-[0.16em] text-textSoft whitespace-nowrap">Ready</span>
             <select
-              className={fieldClassName}
+              className={compactFieldClassName}
               value={draft.readinessMode}
               onChange={(event) => {
                 const readinessMode = event.target.value as Project["readinessMode"];
@@ -539,6 +540,48 @@ export function ProjectDetail({
               <option value="port">port</option>
             </select>
           </label>
+        </div>
+        <div className="grid gap-2.5 [grid-column:1/-1] [grid-template-columns:repeat(auto-fit,minmax(160px,1fr))]">
+          <label className="space-y-1.5">
+            <span className="text-[10px] uppercase tracking-[0.16em] text-textSoft">Arranque</span>
+            <select
+              className={fieldClassName}
+              value={draft.launchMode}
+              onChange={(event) => setDraft({ ...draft, launchMode: event.target.value as Project["launchMode"] })}
+            >
+              <option value="service">service</option>
+              <option value="record">record</option>
+              <option value="mock">mock</option>
+            </select>
+          </label>
+          <label className="space-y-1.5">
+            <span className="text-[10px] uppercase tracking-[0.16em] text-textSoft">Mock match</span>
+            <select
+              className={fieldClassName}
+              value={draft.mockMatchMode}
+              onChange={(event) => setDraft({ ...draft, mockMatchMode: event.target.value as Project["mockMatchMode"] })}
+            >
+              <option value="auto">auto</option>
+              <option value="strict">strict</option>
+              <option value="path">path</option>
+            </select>
+          </label>
+          <label className="space-y-1.5">
+            <span className="text-[10px] uppercase tracking-[0.16em] text-textSoft">Miss status</span>
+            <input
+              type="number"
+              className={fieldClassName}
+              value={draft.mockUnmatchedStatus}
+              onChange={(event) => setDraft({ ...draft, mockUnmatchedStatus: Number(event.target.value || 404) })}
+            />
+          </label>
+        </div>
+        <div className="surface-panel-soft px-3 py-2 text-[12px] text-textMuted [grid-column:1/-1]">
+          {draft.launchMode === "service"
+            ? "service: arranca el microservicio tal cual esta configurado."
+            : draft.launchMode === "record"
+              ? "record: publica un proxy grabador en el puerto del servicio, mueve el proceso real a un puerto interno y guarda request/response para futuros mocks."
+              : "mock: levanta un mock HTTP liviano desde las capturas guardadas en el puerto configurado."}
         </div>
         <div className="space-y-2 [grid-column:1/-1]">
           <span className="text-[10px] uppercase tracking-[0.16em] text-textSoft">Proceso</span>
@@ -637,3 +680,4 @@ export function ProjectDetail({
     </div>
   );
 }
+

@@ -1,4 +1,4 @@
-﻿use tauri::{AppHandle, State};
+use tauri::{AppHandle, State};
 
 use crate::models::{Preset, Project, ProjectOrderUpdate, Snapshot, SystemDiagnostics};
 use crate::{db, diagnostics, runtime, scanner, AppState};
@@ -53,8 +53,11 @@ pub fn import_detected_projects(
 ) -> Result<Snapshot, String> {
     let imported_roots = map_error(db::list_project_root_paths(&state.db_path))?;
     let detected = map_error(scanner::scan_root(&root_path, recursive, &imported_roots))?;
-    let selected =
-        selected_root_paths.map(|entries| entries.into_iter().collect::<std::collections::HashSet<_>>());
+    let selected = selected_root_paths.map(|entries| {
+        entries
+            .into_iter()
+            .collect::<std::collections::HashSet<_>>()
+    });
 
     for project in detected {
         if project.already_imported {

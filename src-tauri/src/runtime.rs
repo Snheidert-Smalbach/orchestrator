@@ -16,18 +16,23 @@ use tokio::{
 };
 
 use crate::{
-    diagnostics,
-    db,
+    db, diagnostics, mocking,
     models::{
-        LogPayload, PackageManager, Project, ProjectStatus, ReadinessMode, RunMode,
+        LaunchMode, LogPayload, PackageManager, Project, ProjectStatus, ReadinessMode, RunMode,
         RuntimeStatusPayload,
     },
+    process_control::JobHandle,
     AppState,
 };
 
 #[derive(Debug, Clone)]
 pub struct RunningProcess {
-    pub pid: u32,
+    pub pid: Option<u32>,
+    pub job: Option<JobHandle>,
+    pub managed_server: Option<mocking::ManagedServerHandle>,
+    pub internal_port: Option<u16>,
+    pub public_port: Option<u16>,
+    pub command_preview: Option<String>,
 }
 
 #[derive(Debug, Default)]
@@ -95,7 +100,11 @@ fn resolve_script_target(project: &Project) -> String {
     }
 
     for candidate in ["start:local", "start:localenv", "start", "start:dev"] {
-        if project.available_scripts.iter().any(|script| script == candidate) {
+        if project
+            .available_scripts
+            .iter()
+            .any(|script| script == candidate)
+        {
             return candidate.to_string();
         }
     }
@@ -258,6 +267,76 @@ fn load_environment(project: &Project) -> Result<HashMap<String, String>> {
     Ok(envs)
 }
 
+fn load_environment_for_launch(
+    project: &Project,
+    forced_port: Option<u16>,
+    public_port: Option<u16>,
+) -> Result<HashMap<String, String>> {
+    let mut envs = load_environment(project)?;
+
+    if let Some(port) = forced_port {
+        envs.insert("PORT".to_string(), port.to_string());
+        envs.insert("ORCHESTRATOR_UPSTREAM_PORT".to_string(), port.to_string());
+    }
+
+    if let Some(port) = public_port {
+        envs.insert("ORCHESTRATOR_PUBLIC_PORT".to_string(), port.to_string());
+    }
+
+    Ok(envs)
+}
+
+fn resolve_command_preview(project: &Project) -> String {
+    match project.launch_mode {
+        LaunchMode::Mock => format!("orchestrator mock {}", project.port.unwrap_or_default()),
+        LaunchMode::Record => format!("orchestrator record {}", project.port.unwrap_or_default()),
+        LaunchMode::Service | LaunchMode::Unknown => build_command_plan(project).display,
+    }
+}
+
+fn request_managed_server_shutdown(entry: &RunningProcess) {
+    if let Some(handle) = &entry.managed_server {
+        handle.shutdown();
+    }
+}
+
+async fn wait_for_managed_server_shutdown(entry: &RunningProcess, port: Option<u16>) -> bool {
+    if let Some(handle) = &entry.managed_server {
+        if !handle.wait_stopped(Duration::from_secs(4)).await {
+            return false;
+        }
+    }
+
+    wait_for_port_release(port).await
+}
+
+fn managed_server_stop_failure(project_name: &str, port: Option<u16>) -> String {
+    match port {
+        Some(port) => format!(
+            "Failed to stop {}: managed mock/record server did not release port {}",
+            project_name, port
+        ),
+        None => format!(
+            "Failed to stop {}: managed mock/record server did not stop",
+            project_name
+        ),
+    }
+}
+
+fn terminate_job_tree(app: &AppHandle, project_id: &str, entry: &RunningProcess) -> Result<bool> {
+    let Some(job) = &entry.job else {
+        return Ok(false);
+    };
+
+    emit_log(app, project_id, "system", "JOB terminate tree");
+    job.terminate(1)?;
+    Ok(true)
+}
+
+async fn runtime_entry(state: &AppState, project_id: &str) -> Option<RunningProcess> {
+    state.runtime.lock().await.running.get(project_id).cloned()
+}
+
 fn port_is_available(port: u16) -> bool {
     TcpListener::bind(("127.0.0.1", port)).is_ok()
 }
@@ -293,7 +372,7 @@ async fn wait_for_port_release(port: Option<u16>) -> bool {
         return true;
     };
 
-    for _ in 0..8 {
+    for _ in 0..20 {
         if port_is_available(port) {
             return true;
         }
@@ -375,7 +454,10 @@ fn parse_ps_command_pids(output: &str, pattern: &str) -> Vec<u32> {
         }
 
         let mut parts = trimmed.splitn(2, char::is_whitespace);
-        let Some(pid) = parts.next().and_then(|value| value.trim().parse::<u32>().ok()) else {
+        let Some(pid) = parts
+            .next()
+            .and_then(|value| value.trim().parse::<u32>().ok())
+        else {
             continue;
         };
         let command = parts.next().unwrap_or_default().to_ascii_lowercase();
@@ -406,7 +488,10 @@ async fn find_pids_by_port(app: &AppHandle, project_id: &str, port: u16) -> Resu
             return Ok(Vec::new());
         }
 
-        return Ok(parse_windows_netstat_pids(&stdout, port));
+        return Ok(parse_windows_netstat_pids(&stdout, port)
+            .into_iter()
+            .filter(|pid| *pid != std::process::id())
+            .collect());
     }
 
     let command_line = format!("lsof -ti tcp:{port}");
@@ -422,7 +507,10 @@ async fn find_pids_by_port(app: &AppHandle, project_id: &str, port: u16) -> Resu
         return Ok(Vec::new());
     }
 
-    Ok(parse_pid_tokens(&stdout))
+    Ok(parse_pid_tokens(&stdout)
+        .into_iter()
+        .filter(|pid| *pid != std::process::id())
+        .collect())
 }
 
 async fn find_pids_by_root_path(
@@ -435,7 +523,12 @@ async fn find_pids_by_root_path(
         let script = format!(
             "$root = '{escaped_root}'; Get-CimInstance Win32_Process | Where-Object {{ $_.ProcessId -ne $PID -and $_.CommandLine -and $_.CommandLine -like \"*$root*\" }} | Select-Object -ExpandProperty ProcessId"
         );
-        emit_log(app, project_id, "system", format!("CMD powershell root-scan {}", root_path));
+        emit_log(
+            app,
+            project_id,
+            "system",
+            format!("CMD powershell root-scan {}", root_path),
+        );
         let output = Command::new("powershell.exe")
             .arg("-NoProfile")
             .arg("-Command")
@@ -448,7 +541,10 @@ async fn find_pids_by_root_path(
             return Ok(Vec::new());
         }
 
-        return Ok(parse_pid_tokens(&stdout));
+        return Ok(parse_pid_tokens(&stdout)
+            .into_iter()
+            .filter(|pid| *pid != std::process::id())
+            .collect());
     }
 
     let command_line = "ps -ax -o pid=,command=";
@@ -464,11 +560,14 @@ async fn find_pids_by_root_path(
         return Ok(Vec::new());
     }
 
-    Ok(parse_ps_command_pids(&stdout, root_path))
+    Ok(parse_ps_command_pids(&stdout, root_path)
+        .into_iter()
+        .filter(|pid| *pid != std::process::id())
+        .collect())
 }
 
 async fn wait_for_project_process_release(app: &AppHandle, project: &Project) -> bool {
-    for _ in 0..8 {
+    for _ in 0..20 {
         let port_released = project.port.map(port_is_available).unwrap_or(true);
         let root_released = find_pids_by_root_path(app, &project.id, &project.root_path)
             .await
@@ -493,21 +592,16 @@ async fn stop_pid(app: &AppHandle, project_id: &str, pid: u32) -> Result<std::pr
             "system",
             format!("CMD taskkill /PID {pid} /T"),
         );
-        return Ok(
-            Command::new("taskkill")
-                .arg("/PID")
-                .arg(pid.to_string())
-                .arg("/T")
-                .output()
-                .await?,
-        );
+        return Ok(Command::new("taskkill")
+            .arg("/PID")
+            .arg(pid.to_string())
+            .arg("/T")
+            .output()
+            .await?);
     }
 
     emit_log(app, project_id, "system", format!("CMD kill {pid}"));
-    Ok(Command::new("kill")
-        .arg(pid.to_string())
-        .output()
-        .await?)
+    Ok(Command::new("kill").arg(pid.to_string()).output().await?)
 }
 
 async fn force_kill_pid(app: &AppHandle, project_id: &str, pid: u32) -> Result<()> {
@@ -550,8 +644,10 @@ async fn force_kill_pid(app: &AppHandle, project_id: &str, pid: u32) -> Result<(
 async fn force_stop_project(
     app: &AppHandle,
     project: &Project,
-    tracked_pid: Option<u32>,
+    tracked_process: Option<&RunningProcess>,
 ) -> Result<String> {
+    let tracked_pid = tracked_process.and_then(|entry| entry.pid);
+    let should_stop_root_processes = tracked_pid.is_some() || project.port.is_none();
     let mut attempted_pids = HashSet::new();
     let mut killed_anything = false;
 
@@ -566,10 +662,44 @@ async fn force_stop_project(
         ),
     );
 
+    if let Some(entry) = tracked_process {
+        request_managed_server_shutdown(entry);
+
+        match terminate_job_tree(app, &project.id, entry) {
+            Ok(true) => {
+                killed_anything = true;
+                sleep(Duration::from_millis(250)).await;
+            }
+            Ok(false) => {}
+            Err(error) => {
+                emit_log(
+                    app,
+                    &project.id,
+                    "stderr",
+                    format!(
+                        "JOB terminate failed, fallback to PID/port force stop: {}",
+                        error
+                    ),
+                );
+            }
+        }
+    }
+
     if let Some(pid) = tracked_pid {
         force_kill_pid(app, &project.id, pid).await?;
         attempted_pids.insert(pid);
         killed_anything = true;
+    }
+
+    if let Some(entry) = tracked_process {
+        if entry.managed_server.is_some()
+            && !wait_for_managed_server_shutdown(entry, entry.public_port.or(project.port)).await
+        {
+            return Err(anyhow!(managed_server_stop_failure(
+                &project.name,
+                entry.public_port.or(project.port),
+            )));
+        }
     }
 
     if !wait_for_port_release(project.port).await {
@@ -584,6 +714,20 @@ async fn force_stop_project(
             ));
         }
 
+        emit_log(
+            app,
+            &project.id,
+            "system",
+            format!(
+                "Port {} currently owned by PID(s): {}",
+                port,
+                pids.iter()
+                    .map(u32::to_string)
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ),
+        );
+
         for pid in pids {
             if attempted_pids.insert(pid) {
                 force_kill_pid(app, &project.id, pid).await?;
@@ -592,11 +736,13 @@ async fn force_stop_project(
         }
     }
 
-    let root_path_pids = find_pids_by_root_path(app, &project.id, &project.root_path).await?;
-    for pid in root_path_pids {
-        if attempted_pids.insert(pid) {
-            force_kill_pid(app, &project.id, pid).await?;
-            killed_anything = true;
+    if should_stop_root_processes {
+        let root_path_pids = find_pids_by_root_path(app, &project.id, &project.root_path).await?;
+        for pid in root_path_pids {
+            if attempted_pids.insert(pid) {
+                force_kill_pid(app, &project.id, pid).await?;
+                killed_anything = true;
+            }
         }
     }
 
@@ -608,7 +754,7 @@ async fn force_stop_project(
         ));
     }
 
-    if !wait_for_project_process_release(app, project).await {
+    if should_stop_root_processes && !wait_for_project_process_release(app, project).await {
         return Err(anyhow!(
             "Processes related to {} are still running after force stop",
             project.name
@@ -628,7 +774,6 @@ async fn force_stop_project(
         "Process force stopped".to_string()
     })
 }
-
 async fn mark_project_stopped(
     app: &AppHandle,
     state: &AppState,
@@ -668,7 +813,12 @@ fn mark_project_stop_failure(
     Ok(())
 }
 
-fn mark_start_failure(app: &AppHandle, state: &AppState, project: &Project, message: impl Into<String>) -> Result<()> {
+fn mark_start_failure(
+    app: &AppHandle,
+    state: &AppState,
+    project: &Project,
+    message: impl Into<String>,
+) -> Result<()> {
     let message = message.into();
     db::update_project_status(&state.db_path, &project.id, ProjectStatus::Failed, None)?;
     emit_status(
@@ -692,22 +842,57 @@ where
     }
 }
 
-async fn spawn_project(app: &AppHandle, state: &AppState, project: &Project) -> Result<()> {
+async fn spawn_service_process(
+    app: &AppHandle,
+    state: &AppState,
+    project: &Project,
+    forced_port: Option<u16>,
+    managed_server: Option<mocking::ManagedServerHandle>,
+    internal_port: Option<u16>,
+    public_port: Option<u16>,
+) -> Result<()> {
     let command_plan = build_command_plan(project);
     if command_plan.display.trim().is_empty() {
+        if let Some(handle) = managed_server.as_ref() {
+            handle.shutdown();
+        }
         let error_message = format!("Project {} has no run target configured", project.name);
         mark_start_failure(app, state, project, error_message.clone())?;
         return Err(anyhow!(error_message));
     }
 
-    let envs = load_environment(project)?;
-    emit_log(app, &project.id, "system", format!("> {}", project.root_path));
-    emit_log(app, &project.id, "system", format!("CMD {}", command_plan.display));
+    let envs = load_environment_for_launch(project, forced_port, public_port.or(project.port))?;
+    emit_log(
+        app,
+        &project.id,
+        "system",
+        format!("> {}", project.root_path),
+    );
+    emit_log(
+        app,
+        &project.id,
+        "system",
+        format!("CMD {}", command_plan.display),
+    );
+    emit_log(
+        app,
+        &project.id,
+        "system",
+        format!("MODE {}", project.launch_mode.as_str()),
+    );
     if let Some(env_file) = &project.selected_env_file {
         emit_log(app, &project.id, "system", format!("ENV {}", env_file));
     }
-    if let Some(port) = project.port {
+    if let Some(port) = public_port.or(project.port) {
         emit_log(app, &project.id, "system", format!("PORT {}", port));
+    }
+    if let Some(port) = internal_port {
+        emit_log(
+            app,
+            &project.id,
+            "system",
+            format!("UPSTREAM_PORT {}", port),
+        );
     }
 
     let mut command = Command::new(&command_plan.executable);
@@ -725,6 +910,9 @@ async fn spawn_project(app: &AppHandle, state: &AppState, project: &Project) -> 
     let mut child = match command.spawn() {
         Ok(child) => child,
         Err(error) => {
+            if let Some(handle) = managed_server.as_ref() {
+                handle.shutdown();
+            }
             let error_message = format!(
                 "Failed to spawn {} with `{}`: {}",
                 project.name, command_plan.display, error
@@ -734,13 +922,42 @@ async fn spawn_project(app: &AppHandle, state: &AppState, project: &Project) -> 
         }
     };
 
+    #[cfg(windows)]
+    let job = match JobHandle::create_and_assign(&child) {
+        Ok(job) => Some(job),
+        Err(error) => {
+            emit_log(
+                app,
+                &project.id,
+                "stderr",
+                format!(
+                    "JOB attach failed, fallback to PID/port force stop: {}",
+                    error
+                ),
+            );
+            None
+        }
+    };
+    #[cfg(not(windows))]
+    let job = None;
+
     let pid = child
         .id()
         .ok_or_else(|| anyhow!("{} did not expose a pid", project.name))?;
     {
         let mut runtime = state.runtime.lock().await;
         runtime.stopping.remove(&project.id);
-        runtime.running.insert(project.id.clone(), RunningProcess { pid });
+        runtime.running.insert(
+            project.id.clone(),
+            RunningProcess {
+                pid: Some(pid),
+                job,
+                managed_server,
+                internal_port,
+                public_port: public_port.or(project.port),
+                command_preview: Some(command_plan.display.clone()),
+            },
+        );
     }
     diagnostics::invalidate_system_diagnostics(state).await;
 
@@ -755,10 +972,20 @@ async fn spawn_project(app: &AppHandle, state: &AppState, project: &Project) -> 
     emit_log(app, &project.id, "system", format!("PID {}", pid));
 
     if let Some(stdout) = child.stdout.take() {
-        tokio::spawn(spawn_stream_reader(app.clone(), project.id.clone(), "stdout", stdout));
+        tokio::spawn(spawn_stream_reader(
+            app.clone(),
+            project.id.clone(),
+            "stdout",
+            stdout,
+        ));
     }
     if let Some(stderr) = child.stderr.take() {
-        tokio::spawn(spawn_stream_reader(app.clone(), project.id.clone(), "stderr", stderr));
+        tokio::spawn(spawn_stream_reader(
+            app.clone(),
+            project.id.clone(),
+            "stderr",
+            stderr,
+        ));
     }
 
     let app_handle = app.clone();
@@ -768,11 +995,26 @@ async fn spawn_project(app: &AppHandle, state: &AppState, project: &Project) -> 
         match child.wait().await {
             Ok(status) => {
                 let exit_code = status.code();
-                let stop_requested = {
+                let (removed_entry, stop_requested) = {
                     let mut runtime = state_clone.runtime.lock().await;
-                    runtime.running.remove(&project_id);
-                    runtime.stopping.remove(&project_id)
+                    let entry = runtime.running.remove(&project_id);
+                    let stopping = runtime.stopping.remove(&project_id);
+                    (entry, stopping)
                 };
+                if let Some(entry) = &removed_entry {
+                    request_managed_server_shutdown(entry);
+                    if !wait_for_managed_server_shutdown(entry, entry.public_port).await {
+                        let message = if let Some(port) = entry.public_port {
+                            format!(
+                                "Managed server did not release port {} after process exit",
+                                port
+                            )
+                        } else {
+                            "Managed server did not stop after process exit".to_string()
+                        };
+                        emit_log(&app_handle, &project_id, "stderr", message);
+                    }
+                }
                 diagnostics::invalidate_system_diagnostics(&state_clone).await;
                 let next_status = if stop_requested || status.success() {
                     ProjectStatus::Stopped
@@ -796,9 +1038,28 @@ async fn spawn_project(app: &AppHandle, state: &AppState, project: &Project) -> 
                         "Process finished".to_string()
                     }),
                 );
-                emit_log(&app_handle, &project_id, "system", format!("Exited with {:?}", exit_code));
+                emit_log(
+                    &app_handle,
+                    &project_id,
+                    "system",
+                    format!("Exited with {:?}", exit_code),
+                );
             }
             Err(error) => {
+                if let Some(entry) = runtime_entry(&state_clone, &project_id).await {
+                    request_managed_server_shutdown(&entry);
+                    if !wait_for_managed_server_shutdown(&entry, entry.public_port).await {
+                        let message = if let Some(port) = entry.public_port {
+                            format!(
+                                "Managed server did not release port {} after process failure",
+                                port
+                            )
+                        } else {
+                            "Managed server did not stop after process failure".to_string()
+                        };
+                        emit_log(&app_handle, &project_id, "stderr", message);
+                    }
+                }
                 clear_runtime_tracking(&state_clone, &project_id).await;
                 let _ = db::update_project_status(
                     &state_clone.db_path,
@@ -821,6 +1082,102 @@ async fn spawn_project(app: &AppHandle, state: &AppState, project: &Project) -> 
     Ok(())
 }
 
+async fn spawn_mock_only_project(
+    app: &AppHandle,
+    state: &AppState,
+    project: &Project,
+) -> Result<()> {
+    let public_port = project.port.ok_or_else(|| {
+        anyhow!(
+            "Project {} needs a configured public port to start in mock mode",
+            project.name
+        )
+    })?;
+    let managed_server = mocking::start_mock_server(
+        app.clone(),
+        state.db_path.clone(),
+        project.clone(),
+        public_port,
+    )
+    .await?;
+
+    {
+        let mut runtime = state.runtime.lock().await;
+        runtime.stopping.remove(&project.id);
+        runtime.running.insert(
+            project.id.clone(),
+            RunningProcess {
+                pid: None,
+                job: None,
+                managed_server: Some(managed_server),
+                internal_port: None,
+                public_port: Some(public_port),
+                command_preview: Some(resolve_command_preview(project)),
+            },
+        );
+    }
+    diagnostics::invalidate_system_diagnostics(state).await;
+
+    db::update_project_status(&state.db_path, &project.id, ProjectStatus::Starting, None)?;
+    emit_status(
+        app,
+        &project.id,
+        ProjectStatus::Starting,
+        None,
+        Some(format!("Mock server listening on {}", public_port)),
+    );
+    emit_log(
+        app,
+        &project.id,
+        "system",
+        format!("MODE {}", project.launch_mode.as_str()),
+    );
+    emit_log(app, &project.id, "system", format!("PORT {}", public_port));
+    Ok(())
+}
+
+async fn spawn_recording_project(
+    app: &AppHandle,
+    state: &AppState,
+    project: &Project,
+) -> Result<()> {
+    let public_port = project.port.ok_or_else(|| {
+        anyhow!(
+            "Project {} needs a configured public port to start in record mode",
+            project.name
+        )
+    })?;
+    let upstream_port = mocking::reserve_free_port()?;
+    let managed_server = mocking::start_recording_proxy(
+        app.clone(),
+        state.db_path.clone(),
+        project.clone(),
+        public_port,
+        upstream_port,
+    )
+    .await?;
+
+    spawn_service_process(
+        app,
+        state,
+        project,
+        Some(upstream_port),
+        Some(managed_server),
+        Some(upstream_port),
+        Some(public_port),
+    )
+    .await
+}
+
+async fn spawn_project(app: &AppHandle, state: &AppState, project: &Project) -> Result<()> {
+    match project.launch_mode {
+        LaunchMode::Service | LaunchMode::Unknown => {
+            spawn_service_process(app, state, project, None, None, None, project.port).await
+        }
+        LaunchMode::Record => spawn_recording_project(app, state, project).await,
+        LaunchMode::Mock => spawn_mock_only_project(app, state, project).await,
+    }
+}
 async fn wait_until_ready(app: &AppHandle, state: &AppState, project: &Project) -> Result<String> {
     db::update_project_status(&state.db_path, &project.id, ProjectStatus::Running, None)?;
     emit_status(
@@ -828,51 +1185,79 @@ async fn wait_until_ready(app: &AppHandle, state: &AppState, project: &Project) 
         &project.id,
         ProjectStatus::Running,
         None,
-        Some("Process started".to_string()),
+        Some(match project.launch_mode {
+            LaunchMode::Mock => "Mock server started".to_string(),
+            LaunchMode::Record => "Recording proxy started".to_string(),
+            LaunchMode::Service | LaunchMode::Unknown => "Process started".to_string(),
+        }),
     );
 
-    match project.readiness_mode {
-        ReadinessMode::None | ReadinessMode::Unknown => sleep(Duration::from_millis(600)).await,
-        ReadinessMode::Delay => {
-            let delay = project
-                .readiness_value
-                .as_deref()
-                .unwrap_or("1500")
-                .parse::<u64>()
-                .unwrap_or(1500);
-            sleep(Duration::from_millis(delay)).await;
-        }
-        ReadinessMode::Port => {
-            let port = project
-                .port
-                .or_else(|| project.readiness_value.as_deref().and_then(|value| value.parse::<u16>().ok()))
-                .ok_or_else(|| {
-                    anyhow!(
-                        "Project {} is configured with readiness=port but has no port",
-                        project.name
-                    )
-                })?;
+    if matches!(project.launch_mode, LaunchMode::Mock) {
+        sleep(Duration::from_millis(150)).await;
+    } else {
+        match project.readiness_mode {
+            ReadinessMode::None | ReadinessMode::Unknown => sleep(Duration::from_millis(600)).await,
+            ReadinessMode::Delay => {
+                let delay = project
+                    .readiness_value
+                    .as_deref()
+                    .unwrap_or("1500")
+                    .parse::<u64>()
+                    .unwrap_or(1500);
+                sleep(Duration::from_millis(delay)).await;
+            }
+            ReadinessMode::Port => {
+                let runtime_state = runtime_entry(state, &project.id).await;
+                let runtime_port = match project.launch_mode {
+                    LaunchMode::Record => {
+                        runtime_state.as_ref().and_then(|entry| entry.internal_port)
+                    }
+                    LaunchMode::Mock => runtime_state.as_ref().and_then(|entry| entry.public_port),
+                    LaunchMode::Service | LaunchMode::Unknown => runtime_state
+                        .as_ref()
+                        .and_then(|entry| entry.public_port.or(entry.internal_port)),
+                };
+                let port = runtime_port
+                    .or(project.port)
+                    .or_else(|| {
+                        project
+                            .readiness_value
+                            .as_deref()
+                            .and_then(|value| value.parse::<u16>().ok())
+                    })
+                    .ok_or_else(|| {
+                        anyhow!(
+                            "Project {} is configured with readiness=port but has no port",
+                            project.name
+                        )
+                    })?;
 
-            let mut attempts = 0u8;
-            loop {
-                if TcpStream::connect(("127.0.0.1", port)).await.is_ok() {
-                    break;
+                let mut attempts = 0u8;
+                loop {
+                    if TcpStream::connect(("127.0.0.1", port)).await.is_ok() {
+                        break;
+                    }
+                    attempts += 1;
+                    if attempts >= 40 {
+                        let message = format!("Port {} was not ready for {}", port, project.name);
+                        db::update_project_status(
+                            &state.db_path,
+                            &project.id,
+                            ProjectStatus::Failed,
+                            None,
+                        )?;
+                        emit_status(
+                            app,
+                            &project.id,
+                            ProjectStatus::Failed,
+                            None,
+                            Some(message.clone()),
+                        );
+                        emit_log(app, &project.id, "stderr", message.clone());
+                        return Err(anyhow!(message));
+                    }
+                    sleep(Duration::from_millis(500)).await;
                 }
-                attempts += 1;
-                if attempts >= 40 {
-                    let message = format!("Port {} was not ready for {}", port, project.name);
-                    db::update_project_status(&state.db_path, &project.id, ProjectStatus::Failed, None)?;
-                    emit_status(
-                        app,
-                        &project.id,
-                        ProjectStatus::Failed,
-                        None,
-                        Some(message.clone()),
-                    );
-                    emit_log(app, &project.id, "stderr", message.clone());
-                    return Err(anyhow!(message));
-                }
-                sleep(Duration::from_millis(500)).await;
             }
         }
     }
@@ -883,11 +1268,14 @@ async fn wait_until_ready(app: &AppHandle, state: &AppState, project: &Project) 
         &project.id,
         ProjectStatus::Ready,
         None,
-        Some("Project ready".to_string()),
+        Some(match project.launch_mode {
+            LaunchMode::Mock => "Mock ready".to_string(),
+            LaunchMode::Record => "Recording proxy ready".to_string(),
+            LaunchMode::Service | LaunchMode::Unknown => "Project ready".to_string(),
+        }),
     );
     Ok(project.id.clone())
 }
-
 fn validate_ports(projects: &[Project]) -> Result<()> {
     let mut grouped: HashMap<u16, Vec<String>> = HashMap::new();
     for project in projects {
@@ -908,7 +1296,11 @@ fn validate_ports(projects: &[Project]) -> Result<()> {
     Ok(())
 }
 
-fn dependencies_ready(project: &Project, ready_ids: &HashSet<String>, running_ids: &HashSet<String>) -> bool {
+fn dependencies_ready(
+    project: &Project,
+    ready_ids: &HashSet<String>,
+    running_ids: &HashSet<String>,
+) -> bool {
     project.dependencies.iter().all(|dependency| {
         !dependency.required_for_start
             || ready_ids.contains(&dependency.depends_on_project_id)
@@ -976,11 +1368,18 @@ fn select_projects(projects: Vec<Project>, project_ids: Option<Vec<String>>) -> 
                 .filter(|project| allowed.contains(&project.id))
                 .collect()
         }
-        _ => projects.into_iter().filter(|project| project.enabled).collect(),
+        _ => projects
+            .into_iter()
+            .filter(|project| project.enabled)
+            .collect(),
     }
 }
 
-pub async fn start_selected(app: AppHandle, state: AppState, project_ids: Option<Vec<String>>) -> Result<()> {
+pub async fn start_selected(
+    app: AppHandle,
+    state: AppState,
+    project_ids: Option<Vec<String>>,
+) -> Result<()> {
     let all_projects = db::list_projects(&state.db_path)?;
     let selected_projects = select_projects(all_projects.clone(), project_ids);
     if selected_projects.is_empty() {
@@ -1037,7 +1436,9 @@ pub async fn start_selected(app: AppHandle, state: AppState, project_ids: Option
             if project.wait_for_previous_ready {
                 if let Some(previous) = previous_project.as_ref() {
                     if !ready_ids.contains(&previous.id) {
-                        if let Err(error) = wait_for_project_ready_status(&app, &state, previous).await {
+                        if let Err(error) =
+                            wait_for_project_ready_status(&app, &state, previous).await
+                        {
                             let message = format!(
                                 "{} no pudo iniciar porque {} no llego a ready: {}",
                                 project.name, previous.name, error
@@ -1103,7 +1504,11 @@ pub async fn start_selected(app: AppHandle, state: AppState, project_ids: Option
     Ok(())
 }
 
-pub async fn stop_selected(app: AppHandle, state: AppState, project_ids: Option<Vec<String>>) -> Result<()> {
+pub async fn stop_selected(
+    app: AppHandle,
+    state: AppState,
+    project_ids: Option<Vec<String>>,
+) -> Result<()> {
     let projects = db::list_projects(&state.db_path)?;
     let project_map = projects
         .iter()
@@ -1135,7 +1540,7 @@ pub async fn stop_selected(app: AppHandle, state: AppState, project_ids: Option<
     let mut failures = Vec::new();
 
     for project_id in selected_ids {
-        let tracked_process = state.runtime.lock().await.running.get(&project_id).cloned();
+        let tracked_process = runtime_entry(&state, &project_id).await;
         let project = project_map.get(&project_id);
         let project_name = project
             .map(|entry| entry.name.clone())
@@ -1143,12 +1548,33 @@ pub async fn stop_selected(app: AppHandle, state: AppState, project_ids: Option<
 
         if let Some(running) = tracked_process {
             mark_stop_requested(&state, &project_id).await;
-            let output = match stop_pid(&app, &project_id, running.pid).await {
+
+            if running.pid.is_none() {
+                let managed_port = running.public_port.or(project.and_then(|entry| entry.port));
+                request_managed_server_shutdown(&running);
+                if !wait_for_managed_server_shutdown(&running, managed_port).await {
+                    clear_stop_requested(&state, &project_id).await;
+                    let message = managed_server_stop_failure(&project_name, managed_port);
+                    mark_project_stop_failure(&app, &state, &project_id, message.clone())?;
+                    failures.push(message);
+                    continue;
+                }
+                mark_project_stopped(&app, &state, &project_id, "Managed server stopped").await?;
+                continue;
+            }
+
+            let pid = running.pid.unwrap();
+            let output = match stop_pid(&app, &project_id, pid).await {
                 Ok(output) => output,
                 Err(error) => {
                     clear_stop_requested(&state, &project_id).await;
                     let message = format!("Failed to stop {}: {}", project_name, error);
-                    db::update_project_status(&state.db_path, &project_id, ProjectStatus::Failed, None)?;
+                    db::update_project_status(
+                        &state.db_path,
+                        &project_id,
+                        ProjectStatus::Failed,
+                        None,
+                    )?;
                     emit_status(
                         &app,
                         &project_id,
@@ -1165,6 +1591,15 @@ pub async fn stop_selected(app: AppHandle, state: AppState, project_ids: Option<
             let process_missing = output_indicates_missing_process(&output);
 
             if output.status.success() || process_missing {
+                let managed_port = running.public_port.or(project.and_then(|entry| entry.port));
+                request_managed_server_shutdown(&running);
+                if !wait_for_managed_server_shutdown(&running, managed_port).await {
+                    clear_stop_requested(&state, &project_id).await;
+                    let message = managed_server_stop_failure(&project_name, managed_port);
+                    mark_project_stop_failure(&app, &state, &project_id, message.clone())?;
+                    failures.push(message);
+                    continue;
+                }
                 remove_running_process(&state, &project_id).await;
 
                 if let Some(project) = project {
@@ -1175,7 +1610,7 @@ pub async fn stop_selected(app: AppHandle, state: AppState, project_ids: Option<
                             "system",
                             "Tracked PID stopped but project processes are still alive, escalating to force stop",
                         );
-                        match force_stop_project(&app, project, Some(running.pid)).await {
+                        match force_stop_project(&app, project, Some(&running)).await {
                             Ok(message) => {
                                 mark_project_stopped(&app, &state, &project_id, message).await?;
                                 continue;
@@ -1183,7 +1618,12 @@ pub async fn stop_selected(app: AppHandle, state: AppState, project_ids: Option<
                             Err(error) => {
                                 clear_stop_requested(&state, &project_id).await;
                                 let message = format!("Failed to stop {}: {}", project_name, error);
-                                mark_project_stop_failure(&app, &state, &project_id, message.clone())?;
+                                mark_project_stop_failure(
+                                    &app,
+                                    &state,
+                                    &project_id,
+                                    message.clone(),
+                                )?;
                                 failures.push(message);
                                 continue;
                             }
@@ -1214,7 +1654,7 @@ pub async fn stop_selected(app: AppHandle, state: AppState, project_ids: Option<
                     "system",
                     format!("Stop failed with `{reason}`, escalating to force stop"),
                 );
-                match force_stop_project(&app, project, Some(running.pid)).await {
+                match force_stop_project(&app, project, Some(&running)).await {
                     Ok(message) => {
                         mark_project_stopped(&app, &state, &project_id, message).await?;
                         continue;
@@ -1236,7 +1676,12 @@ pub async fn stop_selected(app: AppHandle, state: AppState, project_ids: Option<
 
         if matches!(
             project.map(|entry| entry.status.clone()),
-            Some(ProjectStatus::Starting | ProjectStatus::Running | ProjectStatus::Ready | ProjectStatus::Failed)
+            Some(
+                ProjectStatus::Starting
+                    | ProjectStatus::Running
+                    | ProjectStatus::Ready
+                    | ProjectStatus::Failed
+            )
         ) {
             if let Some(project) = project {
                 if !wait_for_project_process_release(&app, project).await {
@@ -1261,13 +1706,8 @@ pub async fn stop_selected(app: AppHandle, state: AppState, project_ids: Option<
                 }
             }
 
-            mark_project_stopped(
-                &app,
-                &state,
-                &project_id,
-                "No tracked pid; state cleared",
-            )
-            .await?;
+            mark_project_stopped(&app, &state, &project_id, "No tracked pid; state cleared")
+                .await?;
         }
     }
 
@@ -1277,7 +1717,6 @@ pub async fn stop_selected(app: AppHandle, state: AppState, project_ids: Option<
         Err(anyhow!(failures.join("\n")))
     }
 }
-
 pub async fn shutdown_all(app: AppHandle, state: AppState) -> Result<()> {
     let _ = stop_selected(app.clone(), state.clone(), None).await;
     let _ = force_stop_selected(app, state, None).await;
@@ -1320,7 +1759,7 @@ pub async fn force_stop_selected(
     let mut failures = Vec::new();
 
     for project_id in selected_ids {
-        let tracked_process = state.runtime.lock().await.running.get(&project_id).cloned();
+        let tracked_process = runtime_entry(&state, &project_id).await;
         let Some(project) = project_map.get(&project_id) else {
             continue;
         };
@@ -1329,7 +1768,51 @@ pub async fn force_stop_selected(
             mark_stop_requested(&state, &project_id).await;
         }
 
-        match force_stop_project(&app, project, tracked_process.as_ref().map(|entry| entry.pid)).await {
+        if let Some(running) = tracked_process.as_ref() {
+            request_managed_server_shutdown(running);
+
+            if running.pid.is_none() {
+                let managed_port = running.public_port.or(project.port);
+                if !wait_for_managed_server_shutdown(running, managed_port).await {
+                    clear_stop_requested(&state, &project_id).await;
+                    let message = managed_server_stop_failure(&project.name, managed_port);
+                    db::update_project_status(
+                        &state.db_path,
+                        &project_id,
+                        ProjectStatus::Failed,
+                        None,
+                    )?;
+                    emit_status(
+                        &app,
+                        &project_id,
+                        ProjectStatus::Failed,
+                        None,
+                        Some(message.clone()),
+                    );
+                    emit_log(&app, &project_id, "stderr", message.clone());
+                    failures.push(message);
+                    continue;
+                }
+                clear_runtime_tracking(&state, &project_id).await;
+                db::update_project_status(
+                    &state.db_path,
+                    &project_id,
+                    ProjectStatus::Stopped,
+                    Some(0),
+                )?;
+                emit_status(
+                    &app,
+                    &project_id,
+                    ProjectStatus::Stopped,
+                    Some(0),
+                    Some("Managed server force stopped".to_string()),
+                );
+                emit_log(&app, &project_id, "system", "Managed server force stopped");
+                continue;
+            }
+        }
+
+        match force_stop_project(&app, project, tracked_process.as_ref()).await {
             Ok(message) => {
                 if tracked_process.is_some() {
                     remove_running_process(&state, &project_id).await;
@@ -1337,7 +1820,12 @@ pub async fn force_stop_selected(
                     clear_runtime_tracking(&state, &project_id).await;
                 }
 
-                db::update_project_status(&state.db_path, &project_id, ProjectStatus::Stopped, Some(0))?;
+                db::update_project_status(
+                    &state.db_path,
+                    &project_id,
+                    ProjectStatus::Stopped,
+                    Some(0),
+                )?;
                 emit_status(
                     &app,
                     &project_id,
@@ -1350,7 +1838,12 @@ pub async fn force_stop_selected(
             Err(error) => {
                 clear_stop_requested(&state, &project_id).await;
                 let message = format!("Failed to force stop {}: {}", project.name, error);
-                db::update_project_status(&state.db_path, &project_id, ProjectStatus::Failed, None)?;
+                db::update_project_status(
+                    &state.db_path,
+                    &project_id,
+                    ProjectStatus::Failed,
+                    None,
+                )?;
                 emit_status(
                     &app,
                     &project_id,
