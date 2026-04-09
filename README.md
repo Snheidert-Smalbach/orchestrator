@@ -40,6 +40,12 @@ npm install
 npm run tauri dev
 ```
 
+## Builds de macOS
+- El workflow `Build macOS App` genera dos `.dmg`: uno para Apple Silicon y otro para Intel.
+- Cada corrida sube esos archivos como artifacts del run en GitHub Actions.
+- Ademas, el workflow publica o actualiza una prerelease llamada `macOS Preview` en GitHub Releases para compartir una URL mas estable.
+- Si el build no esta firmado por Apple, macOS puede pedir abrir con clic derecho `Open` o habilitar `Open Anyway` en `Privacy & Security`.
+
 ## Notas
 - En este sandbox no fue posible compilar ni instalar dependencias porque `cargo` no esta en PATH y `npm`/`pnpm` intentan resolver el home del usuario de una forma bloqueada aqui.
 - La carpeta `Microsoft/` y `.codex-*` fue generada por el sandbox; esta ignorada en `.gitignore`.
