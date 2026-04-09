@@ -1,0 +1,33 @@
+<svg width="256" height="256" viewBox="0 0 256 256" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="maestroBg" x1="36" y1="28" x2="210" y2="228" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#13233B"/>
+      <stop offset="1" stop-color="#0A1322"/>
+    </linearGradient>
+  </defs>
+  <circle cx="128" cy="128" r="114" fill="url(#maestroBg)"/>
+  <circle cx="128" cy="128" r="99" stroke="#D7A45A" stroke-width="8"/>
+  <g opacity="0.36" stroke="#D7A45A" stroke-width="5" stroke-linecap="round">
+    <line x1="52" y1="86" x2="204" y2="86"/>
+    <line x1="52" y1="100" x2="204" y2="100"/>
+    <line x1="52" y1="114" x2="204" y2="114"/>
+    <line x1="52" y1="128" x2="204" y2="128"/>
+    <line x1="52" y1="142" x2="204" y2="142"/>
+  </g>
+  <g fill="#F5E6C7">
+    <circle cx="86" cy="109" r="12"/>
+    <circle cx="78" cy="129" r="11"/>
+    <circle cx="83" cy="150" r="12"/>
+    <circle cx="95" cy="168" r="11"/>
+    <circle cx="112" cy="181" r="10"/>
+  </g>
+  <g stroke="#F5E6C7" stroke-width="10" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M93 178C81 163 77 142 82 119C88 91 108 70 134 68C149 67 163 73 173 85C183 97 186 115 181 131C175 149 161 163 144 172C127 180 106 183 93 178Z"/>
+    <path d="M136 82C148 90 154 103 154 118C154 130 149 138 143 144C150 150 148 158 136 161C127 163 120 168 116 173"/>
+    <path d="M95 178C106 189 123 194 144 191"/>
+  </g>
+  <path d="M152 63L194 33" stroke="#F5E6C7" stroke-width="7" stroke-linecap="round"/>
+  <circle cx="197" cy="31" r="8" fill="#D7A45A"/>
+  <path d="M169 70L182 60" stroke="#D7A45A" stroke-width="4" stroke-linecap="round" opacity="0.9"/>
+  <path d="M141 190C157 189 171 184 183 175" stroke="#D7A45A" stroke-width="5" stroke-linecap="round" opacity="0.8"/>
+</svg>

@@ -23,7 +23,7 @@ import {
 } from "lucide-react";
 import { ScanDialog } from "./components/scan-dialog";
 import { WorkspaceLayout } from "./components/workspace-layout";
-import { pickRootFromDialog } from "./lib/tauri";
+import { getDefaultRoot, pickRootFromDialog } from "./lib/tauri";
 import type { ProcessDiagnostic, Project, ProjectResourceUsage } from "./lib/types";
 import { useAppStore } from "./store/useAppStore";
 
@@ -189,13 +189,24 @@ function collectDependencyClosure(projects: Project[], projectId: string) {
   return ordered.reverse();
 }
 
+function normalizePath(value: string) {
+  return value.replace(/\\/g, "/").toLowerCase();
+}
+
+function pathHasDirectory(path: string, segment: string) {
+  return normalizePath(path)
+    .split("/")
+    .filter(Boolean)
+    .includes(segment.toLowerCase());
+}
+
 function buildQuickProfiles(projects: Project[], selectedProjectId: string | null) {
   const enabledProjectIds = projects.filter((project) => project.enabled).map((project) => project.id);
   const backendProjectIds = projects
-    .filter((project) => project.enabled && project.rootPath.includes("\\BACK\\"))
+    .filter((project) => project.enabled && pathHasDirectory(project.rootPath, "BACK"))
     .map((project) => project.id);
   const frontendProjectIds = projects
-    .filter((project) => project.enabled && project.rootPath.includes("\\FRONT\\"))
+    .filter((project) => project.enabled && pathHasDirectory(project.rootPath, "FRONT"))
     .map((project) => project.id);
 
   const profiles: QuickProfile[] = [];
@@ -260,7 +271,7 @@ function compactCommand(command: string) {
 }
 
 function describeNodeProcess(process: ProcessDiagnostic) {
-  return `PID ${process.pid} · ${formatMemory(process.workingSetMb)} · ${compactCommand(process.command)}`;
+  return `PID ${process.pid} ï¿½ ${formatMemory(process.workingSetMb)} ï¿½ ${compactCommand(process.command)}`;
 }
 
 function quickProfileIcon(profileId: string) {
@@ -423,7 +434,7 @@ export default function App() {
   const projectResources = toProjectResourceMap(diagnostics?.projectResources);
   const runningCount = projects.filter((project) => project.status === "running" || project.status === "ready").length;
   const enabledCount = projects.filter((project) => project.enabled).length;
-  const defaultRoot = settings.defaultRoots[0] ?? "C:\\workspace\\apps\\BACK";
+  const defaultRoot = settings.defaultRoots[0] ?? getDefaultRoot();
   const activeTheme = THEME_DEFINITIONS.find((theme) => theme.id === themeFamily) ?? THEME_DEFINITIONS[0];
   const quickProfiles = buildQuickProfiles(visibleProjects, selectedProject?.id ?? selectedProjectId);
   const freeMemoryTone = diagnostics && diagnostics.freePhysicalMemoryMb < 4096 ? "text-danger" : "text-textStrong";
@@ -1005,7 +1016,7 @@ export default function App() {
             <p className="text-[9px] uppercase tracking-[0.18em] text-textSoft">Diagnostico</p>
             <p className="mt-1 text-textStrong">
               {diagnostics
-                ? `Memoria total ${formatMemory(diagnostics.totalPhysicalMemoryMb)} · libre ${formatMemory(diagnostics.freePhysicalMemoryMb)}.`
+                ? `Memoria total ${formatMemory(diagnostics.totalPhysicalMemoryMb)} ï¿½ libre ${formatMemory(diagnostics.freePhysicalMemoryMb)}.`
                 : "Todavia no hay diagnostico disponible."}
             </p>
           </div>

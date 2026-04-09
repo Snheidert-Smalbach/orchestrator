@@ -1097,8 +1097,8 @@ mod tests {
     };
 
     use crate::models::{
-        LaunchMode, MockMatchMode, PackageManager, Project, ProjectStatus, ReadinessMode, RunMode,
-        RuntimeKind,
+        default_project_shell, LaunchMode, MockMatchMode, PackageManager, Project, ProjectStatus,
+        ReadinessMode, RunMode, RuntimeKind,
     };
 
     fn sample_project(project_id: &str) -> Project {
@@ -1110,7 +1110,7 @@ mod tests {
             package_manager: PackageManager::Npm,
             run_mode: RunMode::Script,
             run_target: "start".to_string(),
-            shell: "cmd".to_string(),
+            shell: default_project_shell().to_string(),
             selected_env_file: None,
             available_env_files: Vec::new(),
             available_scripts: vec!["start".to_string()],

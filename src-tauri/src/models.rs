@@ -1,3 +1,5 @@
+use std::path::PathBuf;
+
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -69,6 +71,29 @@ enum_codec!(ProjectStatus {
     Failed => "failed",
     Unknown => "unknown"
 });
+
+pub fn default_project_shell() -> &'static str {
+    if cfg!(windows) {
+        "cmd"
+    } else {
+        "sh"
+    }
+}
+
+pub fn default_root_path() -> String {
+    if cfg!(windows) {
+        return "C:\\workspace\\apps\\BACK".to_string();
+    }
+
+    let mut base = std::env::var_os("HOME")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from("/"));
+
+    base.push("workspace");
+    base.push("apps");
+    base.push("BACK");
+    base.to_string_lossy().to_string()
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -153,7 +178,7 @@ impl Project {
             package_manager: detected.package_manager.clone(),
             run_mode: detected.suggested_run_mode.clone(),
             run_target: detected.suggested_run_target.clone(),
-            shell: "cmd".to_string(),
+            shell: default_project_shell().to_string(),
             selected_env_file: detected.suggested_env_file.clone(),
             available_env_files: detected.env_files.clone(),
             available_scripts: detected.available_scripts.clone(),

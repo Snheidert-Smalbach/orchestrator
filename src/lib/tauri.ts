@@ -14,10 +14,47 @@ import type {
 } from "./types";
 
 const STORAGE_KEY = "back-orchestrator.mock.snapshot";
-const DEFAULT_ROOT = "C:\\workspace\\apps\\BACK";
 
 const statusListeners = new Set<(payload: RuntimeStatusPayload) => void>();
 const logListeners = new Set<(payload: LogPayload) => void>();
+
+function detectClientOs() {
+  if (typeof navigator === "undefined") {
+    return "windows" as const;
+  }
+
+  return navigator.platform.toLowerCase().includes("win") ? ("windows" as const) : ("unix" as const);
+}
+
+const CLIENT_OS = detectClientOs();
+const DEFAULT_ROOT = CLIENT_OS === "windows" ? "C:\\workspace\\apps\\BACK" : "/workspace/apps/BACK";
+const DEFAULT_SHELL = CLIENT_OS === "windows" ? "cmd" : "sh";
+const DEFAULT_NODE_PROCESS_NAME = CLIENT_OS === "windows" ? "node.exe" : "node";
+
+function normalizePath(path: string) {
+  return path.replace(/\\/g, "/").replace(/\/+/g, "/");
+}
+
+function normalizePathForComparison(path: string) {
+  return normalizePath(path).toLowerCase();
+}
+
+function joinPath(base: string, leaf: string) {
+  const separator = base.includes("\\") ? "\\" : "/";
+  return `${base.replace(/[\\/]+$/, "")}${separator}${leaf}`;
+}
+
+function dirname(path: string) {
+  const usesBackslash = path.includes("\\") && !path.includes("/");
+  const normalized = normalizePath(path).replace(/\/+$/, "");
+  const lastSeparator = normalized.lastIndexOf("/");
+  if (lastSeparator <= 0) {
+    return null;
+  }
+
+  const parent = normalized.slice(0, lastSeparator);
+  return usesBackslash ? parent.replace(/\//g, "\\") : parent;
+}
 
 function isTauriRuntime() {
   return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
@@ -71,8 +108,8 @@ function buildDetectedSeed(options: {
   hasDockerCompose?: boolean;
   envFiles?: string[];
 }) {
-  const rootPath = `${DEFAULT_ROOT}\\${options.name}`;
-  const envFiles = options.envFiles ?? [`${rootPath}\\.env`];
+  const rootPath = joinPath(DEFAULT_ROOT, options.name);
+  const envFiles = options.envFiles ?? [joinPath(rootPath, ".env")];
 
   return {
     name: options.name,
@@ -123,8 +160,8 @@ const detectedSeed: DetectedProject[] = [
     runTarget: "start:localenv",
     port: 3100,
     envFiles: [
-      `${DEFAULT_ROOT}\\sample_api_pages\\.env`,
-      `${DEFAULT_ROOT}\\sample_api_pages\\.env.example`,
+      joinPath(joinPath(DEFAULT_ROOT, "sample_api_pages"), ".env"),
+      joinPath(joinPath(DEFAULT_ROOT, "sample_api_pages"), ".env.example"),
     ],
   }),
   buildDetectedSeed({
@@ -147,7 +184,7 @@ function toProject(detected: DetectedProject): Project {
     packageManager: detected.packageManager,
     runMode: detected.suggestedRunMode,
     runTarget: detected.suggestedRunTarget,
-    shell: "cmd",
+    shell: DEFAULT_SHELL,
     selectedEnvFile: detected.suggestedEnvFile,
     availableEnvFiles: detected.envFiles,
     availableScripts: detected.availableScripts,
@@ -269,7 +306,7 @@ export async function getRuntimeDiagnostics() {
     projectId: resource.projectId,
     pid: resource.trackedPid ?? 4200 + index,
     parentPid: null,
-    name: "node.exe",
+    name: DEFAULT_NODE_PROCESS_NAME,
     command: resource.commandPreview ?? "node",
     workingSetMb: resource.totalNodeWorkingSetMb,
   })) satisfies ProcessDiagnostic[];
@@ -289,20 +326,20 @@ export async function getRuntimeDiagnostics() {
 }
 
 function isPathWithinScanRoot(projectRootPath: string, rootPath: string, recursive: boolean) {
-  const normalizedProject = projectRootPath.toLowerCase();
-  const normalizedRoot = rootPath.toLowerCase();
+  const normalizedProject = normalizePathForComparison(projectRootPath);
+  const normalizedRoot = normalizePathForComparison(rootPath).replace(/\/+$/, "");
 
   if (normalizedProject === normalizedRoot) {
     return true;
   }
 
-  const prefix = `${normalizedRoot}\\`;
+  const prefix = `${normalizedRoot}/`;
   if (!normalizedProject.startsWith(prefix)) {
     return false;
   }
 
   const relative = normalizedProject.slice(prefix.length);
-  const segments = relative.split("\\").filter(Boolean);
+  const segments = relative.split("/").filter(Boolean);
   return recursive ? segments.length <= 3 : segments.length === 1;
 }
 
@@ -312,13 +349,13 @@ export async function scanRoot(rootPath: string, recursive: boolean) {
   }
 
   const snapshot = loadMockSnapshot();
-  const importedRoots = new Set(snapshot.projects.map((project) => project.rootPath));
+  const importedRoots = new Set(snapshot.projects.map((project) => normalizePathForComparison(project.rootPath)));
 
   return detectedSeed
     .filter((project) => isPathWithinScanRoot(project.rootPath, rootPath, recursive))
     .map((project) => ({
       ...project,
-      alreadyImported: importedRoots.has(project.rootPath),
+      alreadyImported: importedRoots.has(normalizePathForComparison(project.rootPath)),
     }));
 }
 
@@ -330,7 +367,7 @@ export async function inspectProject(rootPath: string, preferredEnvFile?: string
     });
   }
 
-  const detected = detectedSeed.find((project) => project.rootPath === rootPath);
+  const detected = detectedSeed.find((project) => normalizePathForComparison(project.rootPath) === normalizePathForComparison(rootPath));
   if (!detected) {
     throw new Error(`No se encontro metadata para ${rootPath}`);
   }
@@ -361,11 +398,11 @@ export async function importDetectedProjects(
 
   const detected = await scanRoot(rootPath, recursive);
   const snapshot = loadMockSnapshot();
-  const existingRoots = new Set(snapshot.projects.map((project) => project.rootPath));
-  const allowedRoots = selectedRootPaths?.length ? new Set(selectedRootPaths) : null;
+  const existingRoots = new Set(snapshot.projects.map((project) => normalizePathForComparison(project.rootPath)));
+  const allowedRoots = selectedRootPaths?.length ? new Set(selectedRootPaths.map((root) => normalizePathForComparison(root))) : null;
   const newProjects = detected
-    .filter((project) => !existingRoots.has(project.rootPath))
-    .filter((project) => !allowedRoots || allowedRoots.has(project.rootPath))
+    .filter((project) => !existingRoots.has(normalizePathForComparison(project.rootPath)))
+    .filter((project) => !allowedRoots || allowedRoots.has(normalizePathForComparison(project.rootPath)))
     .map(toProject);
 
   const next = mergePresetIds({
@@ -394,14 +431,14 @@ export async function importSingleProject(rootPath: string, preferredEnvFile?: s
 
   const detected = await inspectProject(rootPath, preferredEnvFile);
   const snapshot = loadMockSnapshot();
-  if (snapshot.projects.some((project) => project.rootPath === detected.rootPath)) {
+  if (snapshot.projects.some((project) => normalizePathForComparison(project.rootPath) === normalizePathForComparison(detected.rootPath))) {
     return mergePresetIds(snapshot);
   }
 
   const next = mergePresetIds({
     ...snapshot,
     settings: {
-      defaultRoots: [rootPath.split("\\").slice(0, -1).join("\\") || DEFAULT_ROOT],
+      defaultRoots: [dirname(rootPath) ?? DEFAULT_ROOT],
     },
     projects: [...snapshot.projects, toProject(detected)].map((project, index) => ({
       ...project,

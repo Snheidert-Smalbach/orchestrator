@@ -4,12 +4,10 @@ use anyhow::Result;
 use rusqlite::{params, Connection, OptionalExtension};
 
 use crate::models::{
-    LaunchMode, MockMatchMode, PackageManager, Preset, Project, ProjectDependency,
-    ProjectEnvOverride, ProjectOrderUpdate, ProjectStatus, ReadinessMode, RunMode, RuntimeKind,
-    Settings, Snapshot,
+    default_root_path, LaunchMode, MockMatchMode, PackageManager, Preset, Project,
+    ProjectDependency, ProjectEnvOverride, ProjectOrderUpdate, ProjectStatus, ReadinessMode,
+    RunMode, RuntimeKind, Settings, Snapshot,
 };
-
-const DEFAULT_ROOT: &str = "C:\\workspace\\apps\\BACK";
 
 fn open_connection(db_path: &Path) -> Result<Connection> {
     let conn = Connection::open(db_path)?;
@@ -237,7 +235,15 @@ pub fn init_db(db_path: &Path) -> Result<()> {
     )?;
     ensure_project_columns(&conn)?;
 
-    save_default_root(db_path, DEFAULT_ROOT)?;
+    let has_default_roots = conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM app_settings WHERE key = 'default_roots')",
+        [],
+        |row| row.get::<_, i64>(0),
+    )? == 1;
+
+    if !has_default_roots {
+        save_default_root(db_path, &default_root_path())?;
+    }
     Ok(())
 }
 
@@ -254,7 +260,7 @@ pub fn load_settings(db_path: &Path) -> Result<Settings> {
     let default_roots = raw
         .and_then(|value| serde_json::from_str::<Vec<String>>(&value).ok())
         .filter(|roots| !roots.is_empty())
-        .unwrap_or_else(|| vec![DEFAULT_ROOT.to_string()]);
+        .unwrap_or_else(|| vec![default_root_path()]);
 
     Ok(Settings { default_roots })
 }

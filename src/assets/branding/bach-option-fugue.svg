@@ -1,0 +1,29 @@
+<svg width="256" height="256" viewBox="0 0 256 256" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="fugueBg" x1="34" y1="24" x2="220" y2="226" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#10213A"/>
+      <stop offset="1" stop-color="#08111F"/>
+    </linearGradient>
+    <linearGradient id="fugueMark" x1="82" y1="56" x2="176" y2="196" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#F5E6C7"/>
+      <stop offset="1" stop-color="#D7A45A"/>
+    </linearGradient>
+  </defs>
+  <circle cx="128" cy="128" r="114" fill="url(#fugueBg)"/>
+  <circle cx="128" cy="128" r="100" stroke="#D7A45A" stroke-width="8"/>
+  <g opacity="0.28" stroke="#D7A45A" stroke-width="4" stroke-linecap="round">
+    <line x1="58" y1="92" x2="198" y2="92"/>
+    <line x1="58" y1="104" x2="198" y2="104"/>
+    <line x1="58" y1="116" x2="198" y2="116"/>
+    <line x1="58" y1="128" x2="198" y2="128"/>
+    <line x1="58" y1="140" x2="198" y2="140"/>
+  </g>
+  <path d="M118 58C95 58 80 72 80 92C80 110 90 121 109 127C89 132 78 146 78 166C78 191 97 208 124 208C154 208 176 189 176 164C176 145 165 133 145 128C163 122 172 110 172 92C172 71 156 56 131 56" stroke="url(#fugueMark)" stroke-width="13" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M124 58V208" stroke="url(#fugueMark)" stroke-width="11" stroke-linecap="round"/>
+  <path d="M154 66L194 42" stroke="#F5E6C7" stroke-width="7" stroke-linecap="round"/>
+  <circle cx="198" cy="40" r="8" fill="#D7A45A"/>
+  <circle cx="176" cy="92" r="6" fill="#D7A45A"/>
+  <circle cx="176" cy="128" r="6" fill="#D7A45A"/>
+  <circle cx="176" cy="164" r="6" fill="#D7A45A"/>
+  <path d="M83 186C95 196 110 202 126 204" stroke="#D7A45A" stroke-width="5" stroke-linecap="round" opacity="0.75"/>
+</svg>

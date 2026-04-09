@@ -150,21 +150,37 @@ fn package_manager_executable(package_manager: &PackageManager) -> Option<&'stat
 }
 
 fn build_shell_command_plan(project: &Project, command_line: String) -> CommandPlan {
-    if project.shell.eq_ignore_ascii_case("powershell") {
+    if cfg!(windows) {
+        if project.shell.eq_ignore_ascii_case("powershell") {
+            return CommandPlan {
+                executable: "powershell.exe".to_string(),
+                args: vec![
+                    "-NoProfile".to_string(),
+                    "-Command".to_string(),
+                    command_line.clone(),
+                ],
+                display: command_line,
+            };
+        }
+
         return CommandPlan {
-            executable: "powershell.exe".to_string(),
-            args: vec![
-                "-NoProfile".to_string(),
-                "-Command".to_string(),
-                command_line.clone(),
-            ],
+            executable: "cmd.exe".to_string(),
+            args: vec!["/C".to_string(), command_line.clone()],
             display: command_line,
         };
     }
 
+    let shell = if project.shell.eq_ignore_ascii_case("bash") {
+        "bash"
+    } else if project.shell.eq_ignore_ascii_case("zsh") {
+        "zsh"
+    } else {
+        "sh"
+    };
+
     CommandPlan {
-        executable: "cmd.exe".to_string(),
-        args: vec!["/C".to_string(), command_line.clone()],
+        executable: shell.to_string(),
+        args: vec!["-lc".to_string(), command_line.clone()],
         display: command_line,
     }
 }
@@ -420,6 +436,11 @@ fn parse_pid_tokens(output: &str) -> Vec<u32> {
         .collect()
 }
 
+fn filter_current_process_pid(pids: Vec<u32>) -> Vec<u32> {
+    let current_pid = std::process::id();
+    pids.into_iter().filter(|pid| *pid != current_pid).collect()
+}
+
 fn parse_windows_netstat_pids(output: &str, port: u16) -> Vec<u32> {
     let expected_suffix = format!(":{port}");
     let mut seen = HashSet::new();
@@ -435,6 +456,28 @@ fn parse_windows_netstat_pids(output: &str, port: u16) -> Vec<u32> {
         };
 
         if local_address.ends_with(&expected_suffix) && seen.insert(pid) {
+            pids.push(pid);
+        }
+    }
+
+    pids
+}
+
+#[cfg(any(target_os = "linux", test))]
+fn parse_ss_pids(output: &str) -> Vec<u32> {
+    let mut seen = HashSet::new();
+    let mut pids = Vec::new();
+
+    for fragment in output.split("pid=").skip(1) {
+        let digits = fragment
+            .chars()
+            .take_while(|character| character.is_ascii_digit())
+            .collect::<String>();
+        let Some(pid) = digits.parse::<u32>().ok() else {
+            continue;
+        };
+
+        if seen.insert(pid) {
             pids.push(pid);
         }
     }
@@ -475,11 +518,62 @@ fn escape_powershell_single_quotes(value: &str) -> String {
 
 async fn find_pids_by_port(app: &AppHandle, project_id: &str, port: u16) -> Result<Vec<u32>> {
     if cfg!(windows) {
-        let command_line = format!("netstat -ano | findstr :{port}");
+        let powershell_script = format!(
+            "Get-NetTCPConnection -LocalPort {port} -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess -Unique"
+        );
+        emit_log(
+            app,
+            project_id,
+            "system",
+            format!("CMD powershell tcp-port-scan {port}"),
+        );
+
+        match Command::new("powershell.exe")
+            .arg("-NoProfile")
+            .arg("-Command")
+            .arg(&powershell_script)
+            .output()
+            .await
+        {
+            Ok(output) => {
+                let (stdout, stderr) = parse_command_output(&output);
+                let pids = filter_current_process_pid(parse_pid_tokens(&stdout));
+                if !pids.is_empty() {
+                    return Ok(pids);
+                }
+
+                if !output.status.success() && !stderr.is_empty() {
+                    emit_log(
+                        app,
+                        project_id,
+                        "stderr",
+                        format!(
+                            "PowerShell PID lookup for port {} failed, falling back to netstat: {}",
+                            port,
+                            command_failure_reason(&output)
+                        ),
+                    );
+                }
+            }
+            Err(error) => {
+                emit_log(
+                    app,
+                    project_id,
+                    "stderr",
+                    format!(
+                        "PowerShell PID lookup for port {} could not start, falling back to netstat: {}",
+                        port, error
+                    ),
+                );
+            }
+        }
+
+        let command_line = "netstat -ano -p tcp";
         emit_log(app, project_id, "system", format!("CMD {command_line}"));
-        let output = Command::new("cmd.exe")
-            .arg("/C")
-            .arg(&command_line)
+        let output = Command::new("netstat")
+            .arg("-ano")
+            .arg("-p")
+            .arg("tcp")
             .output()
             .await?;
 
@@ -488,29 +582,154 @@ async fn find_pids_by_port(app: &AppHandle, project_id: &str, port: u16) -> Resu
             return Ok(Vec::new());
         }
 
-        return Ok(parse_windows_netstat_pids(&stdout, port)
-            .into_iter()
-            .filter(|pid| *pid != std::process::id())
-            .collect());
+        let pids = filter_current_process_pid(parse_windows_netstat_pids(&stdout, port));
+        if pids.is_empty() && !stderr.is_empty() {
+            emit_log(
+                app,
+                project_id,
+                "stderr",
+                format!(
+                    "netstat PID lookup for port {} returned no PID: {}",
+                    port,
+                    command_failure_reason(&output)
+                ),
+            );
+        }
+
+        return Ok(pids);
     }
 
-    let command_line = format!("lsof -ti tcp:{port}");
+    let command_line = format!("lsof -nP -iTCP:{port} -t");
     emit_log(app, project_id, "system", format!("CMD {command_line}"));
-    let output = Command::new("sh")
-        .arg("-lc")
-        .arg(&command_line)
+    match Command::new("lsof")
+        .arg("-nP")
+        .arg(format!("-iTCP:{port}"))
+        .arg("-t")
         .output()
-        .await?;
+        .await
+    {
+        Ok(output) => {
+            let (stdout, stderr) = parse_command_output(&output);
+            let pids = filter_current_process_pid(parse_pid_tokens(&stdout));
+            if !pids.is_empty() {
+                return Ok(pids);
+            }
 
-    let (stdout, stderr) = parse_command_output(&output);
-    if !output.status.success() && stdout.is_empty() && stderr.is_empty() {
-        return Ok(Vec::new());
+            if !output.status.success() && !stderr.is_empty() {
+                emit_log(
+                    app,
+                    project_id,
+                    "stderr",
+                    format!(
+                        "lsof PID lookup for port {} failed, trying Linux fallbacks if available: {}",
+                        port,
+                        command_failure_reason(&output)
+                    ),
+                );
+            }
+        }
+        Err(error) => {
+            emit_log(
+                app,
+                project_id,
+                "stderr",
+                format!(
+                    "lsof PID lookup for port {} could not start, trying Linux fallbacks if available: {}",
+                    port, error
+                ),
+            );
+        }
     }
 
-    Ok(parse_pid_tokens(&stdout)
-        .into_iter()
-        .filter(|pid| *pid != std::process::id())
-        .collect())
+    #[cfg(target_os = "linux")]
+    {
+        let command_line = format!("ss -ltnp sport = :{port}");
+        emit_log(app, project_id, "system", format!("CMD {command_line}"));
+        match Command::new("ss")
+            .arg("-ltnp")
+            .arg(format!("sport = :{port}"))
+            .output()
+            .await
+        {
+            Ok(output) => {
+                let (stdout, stderr) = parse_command_output(&output);
+                let pids = filter_current_process_pid(parse_ss_pids(&stdout));
+                if !pids.is_empty() {
+                    return Ok(pids);
+                }
+
+                if !output.status.success() && !stderr.is_empty() {
+                    emit_log(
+                        app,
+                        project_id,
+                        "stderr",
+                        format!(
+                            "ss PID lookup for port {} failed, falling back to fuser: {}",
+                            port,
+                            command_failure_reason(&output)
+                        ),
+                    );
+                }
+            }
+            Err(error) => {
+                emit_log(
+                    app,
+                    project_id,
+                    "stderr",
+                    format!(
+                        "ss PID lookup for port {} could not start, falling back to fuser: {}",
+                        port, error
+                    ),
+                );
+            }
+        }
+
+        let command_line = format!("fuser -n tcp {port}");
+        emit_log(app, project_id, "system", format!("CMD {command_line}"));
+        match Command::new("fuser")
+            .arg("-n")
+            .arg("tcp")
+            .arg(port.to_string())
+            .output()
+            .await
+        {
+            Ok(output) => {
+                let (stdout, stderr) = parse_command_output(&output);
+                if !output.status.success() && stdout.is_empty() && stderr.is_empty() {
+                    return Ok(Vec::new());
+                }
+
+                let pids = filter_current_process_pid(parse_pid_tokens(&stdout));
+                if pids.is_empty() && !stderr.is_empty() {
+                    emit_log(
+                        app,
+                        project_id,
+                        "stderr",
+                        format!(
+                            "fuser PID lookup for port {} returned no PID: {}",
+                            port,
+                            command_failure_reason(&output)
+                        ),
+                    );
+                }
+
+                return Ok(pids);
+            }
+            Err(error) => {
+                emit_log(
+                    app,
+                    project_id,
+                    "stderr",
+                    format!(
+                        "fuser PID lookup for port {} could not start: {}",
+                        port, error
+                    ),
+                );
+            }
+        }
+    }
+
+    Ok(Vec::new())
 }
 
 async fn find_pids_by_root_path(
@@ -707,31 +926,38 @@ async fn force_stop_project(
         let pids = find_pids_by_port(app, &project.id, port).await?;
 
         if pids.is_empty() {
-            return Err(anyhow!(
-                "Port {} is still busy for {} but no PID was found to force stop",
-                port,
-                project.name
-            ));
+            emit_log(
+                app,
+                &project.id,
+                "stderr",
+                format!(
+                    "Port {} is still busy for {} but no owning PID was found yet; continuing with root-path force stop",
+                    port,
+                    project.name
+                ),
+            );
         }
 
-        emit_log(
-            app,
-            &project.id,
-            "system",
-            format!(
-                "Port {} currently owned by PID(s): {}",
-                port,
-                pids.iter()
-                    .map(u32::to_string)
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            ),
-        );
+        if !pids.is_empty() {
+            emit_log(
+                app,
+                &project.id,
+                "system",
+                format!(
+                    "Port {} currently owned by PID(s): {}",
+                    port,
+                    pids.iter()
+                        .map(u32::to_string)
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                ),
+            );
 
-        for pid in pids {
-            if attempted_pids.insert(pid) {
-                force_kill_pid(app, &project.id, pid).await?;
-                killed_anything = true;
+            for pid in pids {
+                if attempted_pids.insert(pid) {
+                    force_kill_pid(app, &project.id, pid).await?;
+                    killed_anything = true;
+                }
             }
         }
     }
@@ -1861,5 +2087,32 @@ pub async fn force_stop_selected(
         Ok(())
     } else {
         Err(anyhow!(failures.join("\n")))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{parse_ss_pids, parse_windows_netstat_pids};
+
+    #[test]
+    fn parse_windows_netstat_pids_keeps_listening_owner() {
+        let output = "  TCP    127.0.0.1:3303         0.0.0.0:0              LISTENING       11472\n  TCP    127.0.0.1:3303         127.0.0.1:61189        CLOSE_WAIT      11472\n  TCP    127.0.0.1:61189        127.0.0.1:3303         FIN_WAIT_2      22292\n";
+
+        assert_eq!(parse_windows_netstat_pids(output, 3303), vec![11472]);
+    }
+
+    #[test]
+    fn parse_windows_netstat_pids_supports_ipv6_rows() {
+        let output =
+            "  TCP    [::1]:3303             [::]:0                 LISTENING       11472\n";
+
+        assert_eq!(parse_windows_netstat_pids(output, 3303), vec![11472]);
+    }
+
+    #[test]
+    fn parse_ss_pids_collects_unique_process_ids() {
+        let output = r#"LISTEN 0 4096 127.0.0.1:3303 0.0.0.0:* users:((\"node\",pid=11472,fd=23),(\"npm\",pid=11472,fd=24),(\"bash\",pid=22292,fd=5))"#;
+
+        assert_eq!(parse_ss_pids(output), vec![11472, 22292]);
     }
 }

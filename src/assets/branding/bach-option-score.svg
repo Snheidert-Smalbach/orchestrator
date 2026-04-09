@@ -1,0 +1,31 @@
+<svg width="256" height="256" viewBox="0 0 256 256" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="scoreBg" x1="28" y1="20" x2="226" y2="232" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#162742"/>
+      <stop offset="1" stop-color="#0B1424"/>
+    </linearGradient>
+  </defs>
+  <rect x="16" y="16" width="224" height="224" rx="54" fill="url(#scoreBg)"/>
+  <rect x="28" y="28" width="200" height="200" rx="40" stroke="#D7A45A" stroke-width="7"/>
+  <path d="M60 76C81 66 103 61 128 61C153 61 175 66 196 76V178C175 168 153 163 128 163C103 163 81 168 60 178V76Z" fill="#F4E4C1"/>
+  <path d="M128 61V163" stroke="#C18C47" stroke-width="5" stroke-linecap="round"/>
+  <path d="M60 76C81 66 103 61 128 61C153 61 175 66 196 76" stroke="#D7A45A" stroke-width="5" stroke-linecap="round"/>
+  <path d="M60 178C81 168 103 163 128 163C153 163 175 168 196 178" stroke="#D7A45A" stroke-width="5" stroke-linecap="round"/>
+  <g stroke="#5C3C22" stroke-width="4" stroke-linecap="round" opacity="0.84">
+    <line x1="74" y1="92" x2="118" y2="92"/>
+    <line x1="74" y1="102" x2="118" y2="102"/>
+    <line x1="74" y1="112" x2="118" y2="112"/>
+    <line x1="74" y1="122" x2="118" y2="122"/>
+    <line x1="74" y1="132" x2="118" y2="132"/>
+    <line x1="138" y1="92" x2="182" y2="92"/>
+    <line x1="138" y1="102" x2="182" y2="102"/>
+    <line x1="138" y1="112" x2="182" y2="112"/>
+    <line x1="138" y1="122" x2="182" y2="122"/>
+    <line x1="138" y1="132" x2="182" y2="132"/>
+  </g>
+  <path d="M95 131C95 121 104 113 114 113C123 113 130 120 130 128C130 136 123 143 115 143C107 143 102 138 101 132V92" stroke="#0F1C30" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M149 126C149 118 157 112 166 112C174 112 181 118 181 126C181 134 174 140 166 140C158 140 152 135 151 129V96" stroke="#0F1C30" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M148 56L196 40" stroke="#F5E6C7" stroke-width="7" stroke-linecap="round"/>
+  <circle cx="201" cy="38" r="8" fill="#D7A45A"/>
+  <path d="M79 58C89 48 104 45 118 50C129 54 138 63 142 75" stroke="#D7A45A" stroke-width="5" stroke-linecap="round" opacity="0.9"/>
+</svg>
