@@ -1,4 +1,4 @@
-name: Build macOS App
+name: Build Windows App
 
 on:
   push:
@@ -13,25 +13,15 @@ on:
       - 'tsconfig*.json'
       - 'tailwind.config.*'
       - 'postcss.config.*'
-      - '.github/workflows/build-macos.yml'
+      - '.github/workflows/build-windows.yml'
   workflow_dispatch:
 
 jobs:
-  build-macos:
-    name: Build macOS (${{ matrix.label }})
-    runs-on: macos-latest
+  build-windows:
+    name: Build Windows (x64)
+    runs-on: windows-latest
     permissions:
       contents: read
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - label: Apple Silicon
-            target: aarch64-apple-darwin
-            artifact_name: macos-dmg-apple-silicon
-          - label: Intel
-            target: x86_64-apple-darwin
-            artifact_name: macos-dmg-intel
 
     steps:
       - name: Checkout repository
@@ -46,37 +36,37 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
-          targets: ${{ matrix.target }}
+          targets: x86_64-pc-windows-msvc
 
       - name: Install frontend dependencies
         run: npm ci
 
-      - name: Build macOS DMG
+      - name: Build Windows installer
         uses: tauri-apps/tauri-action@v0.6.2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          args: --target ${{ matrix.target }} --bundles dmg --ci --no-sign
+          args: --target x86_64-pc-windows-msvc --bundles nsis --ci --no-sign
 
       - name: Upload workflow artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.artifact_name }}
-          path: src-tauri/target/${{ matrix.target }}/release/bundle/dmg/*.dmg
+          name: windows-nsis-x64
+          path: src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/*.exe
           if-no-files-found: error
 
-  publish-macos-preview:
-    name: Publish macOS Preview Release
-    needs: build-macos
+  publish-windows-preview:
+    name: Publish Windows Preview Release
+    needs: build-windows
     runs-on: ubuntu-latest
     permissions:
       contents: write
 
     steps:
-      - name: Download macOS artifacts
+      - name: Download Windows artifact
         uses: actions/download-artifact@v4
         with:
-          pattern: macos-dmg-*
+          pattern: windows-nsis-*
           path: release-assets
           merge-multiple: true
 
@@ -84,29 +74,26 @@ jobs:
         id: publish_release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: macos-preview
-          name: macOS Preview
+          tag_name: windows-preview
+          name: Windows Preview
           prerelease: true
           draft: false
           body: |
-            Unsigned macOS preview builds generated automatically from `${{ github.sha }}`.
+            Unsigned Windows preview build generated automatically from `${{ github.sha }}`.
 
             Descargas incluidas:
-            - Apple Silicon (.dmg)
-            - Intel (.dmg)
+            - Windows x64 NSIS installer (.exe)
 
-            Si macOS bloquea la app al abrirla, usa clic derecho > Open
-            o ve a Privacy & Security > Open Anyway.
-          files: release-assets/*.dmg
+            Si Windows SmartScreen muestra una advertencia, usa More info > Run anyway.
+          files: release-assets/*.exe
           overwrite_files: true
 
       - name: Write workflow summary
         run: |
-          echo "## macOS Downloads" >> "$GITHUB_STEP_SUMMARY"
+          echo "## Windows Downloads" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
           echo "Artifacts del run:" >> "$GITHUB_STEP_SUMMARY"
-          echo "- macos-dmg-apple-silicon" >> "$GITHUB_STEP_SUMMARY"
-          echo "- macos-dmg-intel" >> "$GITHUB_STEP_SUMMARY"
+          echo "- windows-nsis-x64" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
           echo "Release estable para compartir:" >> "$GITHUB_STEP_SUMMARY"
           echo "${{ steps.publish_release.outputs.url }}" >> "$GITHUB_STEP_SUMMARY"
