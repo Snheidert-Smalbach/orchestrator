@@ -1,9 +1,11 @@
-﻿import * as ScrollArea from "@radix-ui/react-scroll-area";
-import * as Tabs from "@radix-ui/react-tabs";
 import { Pin, PinOff } from "lucide-react";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { LogPayload, Project } from "../lib/types";
 import { useAppStore } from "../store/useAppStore";
+import { Button } from "./ui/button";
+import { EmptyState } from "./ui/empty-state";
+import { ScrollArea } from "./ui/scroll-area";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "./ui/tabs";
 
 interface LogConsoleProps {
   projects: Project[];
@@ -35,6 +37,7 @@ function parseTimestamp(timestamp: string) {
   if (/^\d+$/.test(timestamp)) {
     return new Date(Number(timestamp));
   }
+
   return new Date(timestamp);
 }
 
@@ -139,7 +142,13 @@ export function LogConsole({ projects, selectedProjectId }: LogConsoleProps) {
 
   function renderEntries(entries: LogPayload[], includeProjectName: boolean) {
     if (!entries.length) {
-      return <p className="font-mono text-[10px] text-textSoft">sin salida todavia</p>;
+      return (
+        <EmptyState
+          title="Sin salida todavía"
+          description="Cuando haya eventos o logs del runtime aparecerán en esta consola."
+          className="mt-4"
+        />
+      );
     }
 
     return (
@@ -177,48 +186,37 @@ export function LogConsole({ projects, selectedProjectId }: LogConsoleProps) {
 
   return (
     <div className="surface-panel flex h-full min-h-0 flex-col overflow-hidden">
-      <div className="surface-divider flex flex-wrap items-center justify-between gap-2 px-2.5 py-1.5">
+      <div className="surface-divider flex flex-wrap items-center justify-between gap-2 px-3 py-2">
         <div>
           <p className="text-[9px] uppercase tracking-[0.22em] text-textSoft">Observabilidad</p>
-          <h2 className="mt-0.5 text-[11px] font-semibold text-textStrong">Consola de salida</h2>
+          <h2 className="mt-0.5 text-[12px] font-semibold text-textStrong">Consola de salida</h2>
         </div>
-        <button
+        <Button
           type="button"
-          className={[
-            "inline-flex items-center gap-1 border px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-[0.14em] transition",
-            followOutput
-              ? "border-accent/40 bg-accent/10 text-accent"
-              : "border-line bg-panelSoft/75 text-textMuted hover:bg-panelSoft",
-          ].join(" ")}
+          variant={followOutput ? "default" : "secondary"}
+          size="sm"
           onClick={() => setFollowOutput((current) => !current)}
           title="Mantener la consola pegada al final"
         >
           {followOutput ? <Pin className="h-3 w-3" /> : <PinOff className="h-3 w-3" />}
           {followOutput ? "Pegada abajo" : "Fijar abajo"}
-        </button>
+        </Button>
       </div>
 
-      <Tabs.Root value={activeTab} onValueChange={setActiveTab} className="flex min-h-0 flex-1 flex-col overflow-hidden">
-        <Tabs.List className="surface-divider flex flex-wrap gap-1 overflow-auto bg-ink/30 px-2 py-1 scrollbar-thin">
-          <Tabs.Trigger
-            value="combined"
-            className="border border-transparent px-1.5 py-0.5 font-mono text-[9px] uppercase tracking-[0.14em] text-textSoft transition data-[state=active]:border-accent/30 data-[state=active]:bg-accent/10 data-[state=active]:text-accent"
-          >
+      <Tabs value={activeTab} onValueChange={setActiveTab} className="flex min-h-0 flex-1 flex-col overflow-hidden">
+        <TabsList className="surface-divider overflow-auto bg-ink/30 px-2 py-1 scrollbar-thin">
+          <TabsTrigger value="combined" className="font-mono text-[9px]">
             Combinado
-          </Tabs.Trigger>
+          </TabsTrigger>
           {projects.map((project) => (
-            <Tabs.Trigger
-              key={project.id}
-              value={project.id}
-              className="border border-transparent px-1.5 py-0.5 font-mono text-[9px] uppercase tracking-[0.14em] text-textSoft transition data-[state=active]:border-accent/30 data-[state=active]:bg-accent/10 data-[state=active]:text-accent"
-            >
+            <TabsTrigger key={project.id} value={project.id} className="font-mono text-[9px]">
               {project.name}
-            </Tabs.Trigger>
+            </TabsTrigger>
           ))}
-        </Tabs.List>
+        </TabsList>
 
-        <Tabs.Content value={activeTab} className="min-h-0 flex-1">
-          <ScrollArea.Root className="relative h-full overflow-hidden bg-ink/55">
+        <TabsContent value={activeTab} className="min-h-0 flex-1">
+          <div className="relative h-full overflow-hidden bg-ink/55">
             <div aria-hidden className="console-matrix">
               {matrixColumns.map((column) => (
                 <span
@@ -236,19 +234,20 @@ export function LogConsole({ projects, selectedProjectId }: LogConsoleProps) {
                 </span>
               ))}
             </div>
-            <ScrollArea.Viewport
-              ref={(node) => setViewportRef(activeTab, node)}
-              className="relative z-10 h-full bg-[linear-gradient(180deg,rgba(2,8,20,0.18),rgba(2,8,20,0.08))] px-2 py-1.5"
-              onScroll={(event) => handleViewportScroll(activeTab, event.currentTarget)}
+
+            <ScrollArea
+              className="relative z-10 h-full bg-[linear-gradient(180deg,rgba(2,8,20,0.18),rgba(2,8,20,0.08))]"
+              viewportClassName="px-3 py-2"
+              viewportRef={(node) => setViewportRef(activeTab, node)}
+              viewportProps={{
+                onScroll: (event) => handleViewportScroll(activeTab, event.currentTarget),
+              }}
             >
               {renderEntries(activeEntries, includeProjectName)}
-            </ScrollArea.Viewport>
-            <ScrollArea.Scrollbar orientation="vertical" className="w-1.5 bg-transparent">
-              <ScrollArea.Thumb className="bg-line/55" />
-            </ScrollArea.Scrollbar>
-          </ScrollArea.Root>
-        </Tabs.Content>
-      </Tabs.Root>
+            </ScrollArea>
+          </div>
+        </TabsContent>
+      </Tabs>
     </div>
   );
 }

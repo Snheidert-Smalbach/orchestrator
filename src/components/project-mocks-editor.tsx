@@ -1,18 +1,16 @@
 import { Plus, RefreshCw, Save, Trash2 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
-import {
-  deleteProjectMock,
-  getProjectMocks,
-  saveProjectMock,
-} from "../lib/tauri";
-import type {
-  MockHeader,
-  MockKind,
-  Project,
-  ProjectMock,
-  ProjectMockCollection,
-} from "../lib/types";
+import { deleteProjectMock, getProjectMocks, saveProjectMock } from "../lib/tauri";
+import type { MockHeader, MockKind, Project, ProjectMock, ProjectMockCollection } from "../lib/types";
 import { useAppStore } from "../store/useAppStore";
+import { Badge } from "./ui/badge";
+import { Button } from "./ui/button";
+import { Card } from "./ui/card";
+import { EmptyState } from "./ui/empty-state";
+import { FieldGroup, FieldLabel, FieldLabelWrap } from "./ui/field";
+import { Input } from "./ui/input";
+import { Select } from "./ui/select";
+import { Textarea } from "./ui/textarea";
 
 type MockEditorState = {
   mock: ProjectMock;
@@ -91,7 +89,7 @@ function textToHeaders(text: string) {
     .map((line) => {
       const parsed = splitHeaderLine(line);
       if (!parsed?.name) {
-        throw new Error(`Encabezado invalido: ${line}`);
+        throw new Error(`Encabezado inválido: ${line}`);
       }
 
       return parsed satisfies MockHeader;
@@ -231,10 +229,7 @@ export function ProjectMocksEditor({ project }: { project: Project }) {
       setCollection(nextCollection);
       patchProjectMockSummary(project.id, nextCollection.summary);
 
-      const nextSelectedMock =
-        nextCollection.mocks.find((mock) => mock.id === preferredMockId) ??
-        nextCollection.mocks[0] ??
-        null;
+      const nextSelectedMock = nextCollection.mocks.find((mock) => mock.id === preferredMockId) ?? nextCollection.mocks[0] ?? null;
       setSelectedMockId(nextSelectedMock?.id ?? null);
       setEditor(nextSelectedMock ? createEditorState(nextSelectedMock) : null);
     } catch (loadError) {
@@ -293,10 +288,7 @@ export function ProjectMocksEditor({ project }: { project: Project }) {
       setCollection(nextCollection);
       patchProjectMockSummary(project.id, nextCollection.summary);
 
-      const persistedMock =
-        nextCollection.mocks.find((mock) => mock.id === savedMock.id) ??
-        nextCollection.mocks[0] ??
-        null;
+      const persistedMock = nextCollection.mocks.find((mock) => mock.id === savedMock.id) ?? nextCollection.mocks[0] ?? null;
       setSelectedMockId(persistedMock?.id ?? null);
       setEditor(persistedMock ? createEditorState(persistedMock) : null);
     } catch (saveError) {
@@ -344,35 +336,23 @@ export function ProjectMocksEditor({ project }: { project: Project }) {
         <div className="min-w-0">
           <p className="text-[10px] uppercase tracking-[0.16em] text-textSoft">Mocks del servicio</p>
           <p className="mt-0.5 truncate text-[11px] text-textMuted">
-            {countLabel(collection.summary.totalCount, "mock")} | {countLabel(collection.summary.manualCount, "manual")} | {countLabel(collection.summary.capturedCount, "capturado", "capturados")}
+            {countLabel(collection.summary.totalCount, "mock")} | {countLabel(collection.summary.manualCount, "manual")} |{" "}
+            {countLabel(collection.summary.capturedCount, "capturado", "capturados")}
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-1.5">
-          <button
-            type="button"
-            className="surface-chip inline-flex items-center gap-1 px-2 py-1 text-[10px] font-semibold text-textStrong"
-            onClick={() => void refreshMocks(selectedMockId)}
-            disabled={isLoading}
-          >
+          <Button type="button" variant="secondary" size="sm" onClick={() => void refreshMocks(selectedMockId)} disabled={isLoading}>
             <RefreshCw className={["h-3 w-3", isLoading ? "animate-spin" : ""].join(" ")} />
             Refrescar
-          </button>
-          <button
-            type="button"
-            className="inline-flex items-center gap-1 border border-accent/40 bg-accent/10 px-2 py-1 text-[10px] font-semibold text-accent"
-            onClick={() => handleCreate("rest")}
-          >
+          </Button>
+          <Button type="button" variant="default" size="sm" onClick={() => handleCreate("rest")}>
             <Plus className="h-3 w-3" />
             REST
-          </button>
-          <button
-            type="button"
-            className="inline-flex items-center gap-1 border border-info/35 bg-info/10 px-2 py-1 text-[10px] font-semibold text-info"
-            onClick={() => handleCreate("graphql")}
-          >
+          </Button>
+          <Button type="button" variant="secondary" size="sm" onClick={() => handleCreate("graphql")} className="text-info">
             <Plus className="h-3 w-3" />
             GraphQL
-          </button>
+          </Button>
         </div>
       </div>
 
@@ -380,12 +360,8 @@ export function ProjectMocksEditor({ project }: { project: Project }) {
         <aside className="surface-panel-soft flex min-h-0 flex-col overflow-hidden">
           <div className="surface-divider flex shrink-0 flex-wrap items-center justify-between gap-1.5 px-2.5 py-2">
             <div className="flex min-w-0 flex-wrap gap-1">
-              <span className="surface-chip px-1.5 py-0.5 text-[9px] uppercase tracking-[0.12em] text-textMuted">
-                {collection.summary.graphqlCount} gql
-              </span>
-              <span className="surface-chip px-1.5 py-0.5 text-[9px] uppercase tracking-[0.12em] text-textMuted">
-                {collection.summary.restCount} rest
-              </span>
+              <Badge variant="secondary">{collection.summary.graphqlCount} gql</Badge>
+              <Badge variant="secondary">{collection.summary.restCount} rest</Badge>
             </div>
             <span className="text-[9px] uppercase tracking-[0.14em] text-textSoft">
               {formatTimestamp(collection.summary.lastUpdatedAt)}
@@ -403,10 +379,8 @@ export function ProjectMocksEditor({ project }: { project: Project }) {
                     }}
                     type="button"
                     className={[
-                      "border px-2.5 py-2 text-left transition",
-                      selectedMockId === mock.id
-                        ? "border-accent/40 bg-accent/10 text-textStrong"
-                        : "surface-chip text-textMuted hover:bg-panelSoft/80",
+                      "ui-mock-list-item",
+                      selectedMockId === mock.id ? "ui-mock-list-item--active" : "",
                     ].join(" ")}
                     onClick={() => selectMock(mock)}
                   >
@@ -415,13 +389,13 @@ export function ProjectMocksEditor({ project }: { project: Project }) {
                         {mock.requestMethod}
                       </span>
                       <div className="flex shrink-0 items-center gap-1">
-                        <span className="surface-chip px-1 py-0.5 text-[8px] uppercase tracking-[0.12em] text-textMuted">
+                        <Badge variant="secondary" className="px-1 py-0.5 text-[8px]">
                           {mock.kind}
-                        </span>
+                        </Badge>
                         {mock.source === "manual" ? (
-                          <span className="surface-chip px-1 py-0.5 text-[8px] uppercase tracking-[0.12em] text-accent">
+                          <Badge variant="info" className="px-1 py-0.5 text-[8px]">
                             manual
-                          </span>
+                          </Badge>
                         ) : null}
                       </div>
                     </div>
@@ -435,9 +409,7 @@ export function ProjectMocksEditor({ project }: { project: Project }) {
                   </button>
                 ))
               ) : (
-                <div className="surface-panel px-3 py-4 text-[11px] text-textMuted">
-                  No hay mocks configurados todavia.
-                </div>
+                <EmptyState title="No hay mocks todavía" description="Crea uno manual o refresca para cargar capturas existentes." />
               )}
             </div>
           </div>
@@ -451,48 +423,35 @@ export function ProjectMocksEditor({ project }: { project: Project }) {
                   <p className="truncate text-[11px] font-semibold text-textStrong">{editor.mock.name}</p>
                   <p className="mt-0.5 truncate text-[10px] text-textMuted">{selectedDescriptor}</p>
                   <p className="mt-0.5 text-[10px] text-textSoft">
-                    {selectedMockId ? (editor.mock.source === "manual" ? "manual" : "capturado") : "nuevo"} | {formatTimestamp(editor.mock.recordedAt)}
+                    {selectedMockId ? (editor.mock.source === "manual" ? "manual" : "capturado") : "nuevo"} |{" "}
+                    {formatTimestamp(editor.mock.recordedAt)}
                   </p>
                 </div>
                 <div className="flex shrink-0 flex-wrap gap-1.5">
-                  <button
-                    type="button"
-                    className="inline-flex items-center gap-1 border border-danger/40 bg-danger/12 px-2 py-1 text-[10px] font-semibold text-danger"
-                    onClick={() => void handleDelete()}
-                    disabled={isDeleting}
-                  >
+                  <Button type="button" variant="destructive" size="sm" onClick={() => void handleDelete()} disabled={isDeleting}>
                     <Trash2 className="h-3 w-3" />
                     {selectedMockId ? "Eliminar" : "Descartar"}
-                  </button>
-                  <button
-                    type="button"
-                    className="inline-flex items-center gap-1 border border-accent/40 bg-accent/10 px-2 py-1 text-[10px] font-semibold text-accent"
-                    onClick={() => void handleSave()}
-                    disabled={isSaving}
-                  >
+                  </Button>
+                  <Button type="button" variant="default" size="sm" onClick={() => void handleSave()} disabled={isSaving}>
                     <Save className="h-3 w-3" />
                     {isSaving ? "Guardando" : "Guardar"}
-                  </button>
+                  </Button>
                 </div>
               </div>
 
               <div ref={editorViewportRef} className="min-h-0 flex-1 overflow-auto px-3 py-2.5 scrollbar-thin">
                 <div className="grid gap-2.5">
                   <div className="grid gap-2 xl:grid-cols-[minmax(0,1fr)_120px_120px]">
-                    <label className="space-y-1">
-                      <span className="text-[9px] uppercase tracking-[0.14em] text-textSoft">Nombre</span>
-                      <input
-                        className="surface-chip w-full px-2.5 py-1.5 text-[12px] text-textStrong"
+                    <FieldLabelWrap>
+                      <FieldLabel>Nombre</FieldLabel>
+                      <Input
                         value={editor.mock.name}
-                        onChange={(event) =>
-                          setEditor({ ...editor, mock: { ...editor.mock, name: event.target.value } })
-                        }
+                        onChange={(event) => setEditor({ ...editor, mock: { ...editor.mock, name: event.target.value } })}
                       />
-                    </label>
-                    <label className="space-y-1">
-                      <span className="text-[9px] uppercase tracking-[0.14em] text-textSoft">Tipo</span>
-                      <select
-                        className="surface-chip w-full px-2.5 py-1.5 text-[12px] text-textStrong"
+                    </FieldLabelWrap>
+                    <FieldLabelWrap>
+                      <FieldLabel>Tipo</FieldLabel>
+                      <Select
                         value={editor.mock.kind}
                         onChange={(event) => {
                           const nextKind = event.target.value as ProjectMock["kind"];
@@ -531,13 +490,12 @@ export function ProjectMocksEditor({ project }: { project: Project }) {
                         <option value="rest">rest</option>
                         <option value="graphql">graphql</option>
                         <option value="http_other">http_other</option>
-                      </select>
-                    </label>
-                    <label className="space-y-1">
-                      <span className="text-[9px] uppercase tracking-[0.14em] text-textSoft">Status</span>
-                      <input
+                      </Select>
+                    </FieldLabelWrap>
+                    <FieldLabelWrap>
+                      <FieldLabel>Status</FieldLabel>
+                      <Input
                         type="number"
-                        className="surface-chip w-full px-2.5 py-1.5 text-[12px] text-textStrong"
                         value={editor.mock.responseStatusCode}
                         onChange={(event) =>
                           setEditor({
@@ -549,31 +507,26 @@ export function ProjectMocksEditor({ project }: { project: Project }) {
                           })
                         }
                       />
-                    </label>
+                    </FieldLabelWrap>
                   </div>
 
                   <div className="grid gap-2 xl:grid-cols-[90px_minmax(0,1fr)_minmax(0,0.8fr)]">
-                    <label className="space-y-1">
-                      <span className="text-[9px] uppercase tracking-[0.14em] text-textSoft">Metodo</span>
-                      <input
-                        className="surface-chip w-full px-2.5 py-1.5 text-[12px] text-textStrong"
+                    <FieldLabelWrap>
+                      <FieldLabel>Método</FieldLabel>
+                      <Input
                         value={editor.mock.requestMethod}
                         onChange={(event) =>
                           setEditor({
                             ...editor,
-                            mock: {
-                              ...editor.mock,
-                              requestMethod: event.target.value.toUpperCase(),
-                            },
+                            mock: { ...editor.mock, requestMethod: event.target.value.toUpperCase() },
                           })
                         }
                         disabled={editor.mock.kind === "graphql"}
                       />
-                    </label>
-                    <label className="space-y-1">
-                      <span className="text-[9px] uppercase tracking-[0.14em] text-textSoft">Path</span>
-                      <input
-                        className="surface-chip w-full px-2.5 py-1.5 text-[12px] text-textStrong"
+                    </FieldLabelWrap>
+                    <FieldLabelWrap>
+                      <FieldLabel>Path</FieldLabel>
+                      <Input
                         value={editor.mock.requestPath}
                         onChange={(event) =>
                           setEditor({
@@ -582,11 +535,10 @@ export function ProjectMocksEditor({ project }: { project: Project }) {
                           })
                         }
                       />
-                    </label>
-                    <label className="space-y-1">
-                      <span className="text-[9px] uppercase tracking-[0.14em] text-textSoft">Query string</span>
-                      <input
-                        className="surface-chip w-full px-2.5 py-1.5 text-[12px] text-textStrong"
+                    </FieldLabelWrap>
+                    <FieldLabelWrap>
+                      <FieldLabel>Query string</FieldLabel>
+                      <Input
                         value={editor.mock.requestQuery}
                         onChange={(event) =>
                           setEditor({
@@ -595,50 +547,38 @@ export function ProjectMocksEditor({ project }: { project: Project }) {
                           })
                         }
                       />
-                    </label>
+                    </FieldLabelWrap>
                   </div>
 
                   {editor.mock.kind === "graphql" ? (
                     <div className="grid gap-2 xl:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)]">
-                      <label className="space-y-1">
-                        <span className="text-[9px] uppercase tracking-[0.14em] text-textSoft">Query GraphQL</span>
-                        <textarea
-                          rows={8}
-                          className="surface-chip w-full px-2.5 py-1.5 text-[12px] text-textStrong"
-                          value={editor.graphqlQuery}
-                          onChange={(event) => setEditor({ ...editor, graphqlQuery: event.target.value })}
-                        />
-                      </label>
+                      <FieldLabelWrap>
+                        <FieldLabel>Query GraphQL</FieldLabel>
+                        <Textarea rows={8} value={editor.graphqlQuery} onChange={(event) => setEditor({ ...editor, graphqlQuery: event.target.value })} />
+                      </FieldLabelWrap>
                       <div className="grid gap-2">
-                        <label className="space-y-1">
-                          <span className="text-[9px] uppercase tracking-[0.14em] text-textSoft">Variables JSON</span>
-                          <textarea
+                        <FieldLabelWrap>
+                          <FieldLabel>Variables JSON</FieldLabel>
+                          <Textarea
                             rows={6}
-                            className="surface-chip w-full px-2.5 py-1.5 text-[12px] text-textStrong"
                             value={editor.graphqlVariablesText}
-                            onChange={(event) =>
-                              setEditor({ ...editor, graphqlVariablesText: event.target.value })
-                            }
+                            onChange={(event) => setEditor({ ...editor, graphqlVariablesText: event.target.value })}
                           />
-                        </label>
-                        <label className="space-y-1">
-                          <span className="text-[9px] uppercase tracking-[0.14em] text-textSoft">Operation</span>
-                          <input
-                            className="surface-chip w-full px-2.5 py-1.5 text-[12px] text-textStrong"
+                        </FieldLabelWrap>
+                        <FieldLabelWrap>
+                          <FieldLabel>Operation</FieldLabel>
+                          <Input
                             value={editor.graphqlOperationName}
-                            onChange={(event) =>
-                              setEditor({ ...editor, graphqlOperationName: event.target.value })
-                            }
+                            onChange={(event) => setEditor({ ...editor, graphqlOperationName: event.target.value })}
                           />
-                        </label>
+                        </FieldLabelWrap>
                       </div>
                     </div>
                   ) : (
-                    <label className="space-y-1">
-                      <span className="text-[9px] uppercase tracking-[0.14em] text-textSoft">Body request</span>
-                      <textarea
+                    <FieldLabelWrap>
+                      <FieldLabel>Body request</FieldLabel>
+                      <Textarea
                         rows={5}
-                        className="surface-chip w-full px-2.5 py-1.5 text-[12px] text-textStrong"
                         value={editor.mock.requestBody}
                         onChange={(event) =>
                           setEditor({
@@ -647,42 +587,35 @@ export function ProjectMocksEditor({ project }: { project: Project }) {
                           })
                         }
                       />
-                    </label>
+                    </FieldLabelWrap>
                   )}
 
                   <div className="grid gap-2 xl:grid-cols-2">
-                    <label className="space-y-1">
-                      <span className="text-[9px] uppercase tracking-[0.14em] text-textSoft">Headers request</span>
-                      <textarea
+                    <FieldLabelWrap>
+                      <FieldLabel>Headers request</FieldLabel>
+                      <Textarea
                         rows={4}
-                        className="surface-chip w-full px-2.5 py-1.5 text-[12px] text-textStrong"
                         placeholder={"Authorization: Bearer ...\nX-Tenant: demo"}
                         value={editor.requestHeadersText}
-                        onChange={(event) =>
-                          setEditor({ ...editor, requestHeadersText: event.target.value })
-                        }
+                        onChange={(event) => setEditor({ ...editor, requestHeadersText: event.target.value })}
                       />
-                    </label>
-                    <label className="space-y-1">
-                      <span className="text-[9px] uppercase tracking-[0.14em] text-textSoft">Headers response</span>
-                      <textarea
+                    </FieldLabelWrap>
+                    <FieldLabelWrap>
+                      <FieldLabel>Headers response</FieldLabel>
+                      <Textarea
                         rows={4}
-                        className="surface-chip w-full px-2.5 py-1.5 text-[12px] text-textStrong"
                         placeholder="Content-Type: application/json"
                         value={editor.responseHeadersText}
-                        onChange={(event) =>
-                          setEditor({ ...editor, responseHeadersText: event.target.value })
-                        }
+                        onChange={(event) => setEditor({ ...editor, responseHeadersText: event.target.value })}
                       />
-                    </label>
+                    </FieldLabelWrap>
                   </div>
 
                   <div className="grid gap-2 xl:grid-cols-[minmax(0,1fr)_180px]">
-                    <label className="space-y-1">
-                      <span className="text-[9px] uppercase tracking-[0.14em] text-textSoft">Body response</span>
-                      <textarea
+                    <FieldLabelWrap>
+                      <FieldLabel>Body response</FieldLabel>
+                      <Textarea
                         rows={7}
-                        className="surface-chip w-full px-2.5 py-1.5 text-[12px] text-textStrong"
                         value={editor.mock.responseBody}
                         onChange={(event) =>
                           setEditor({
@@ -691,12 +624,11 @@ export function ProjectMocksEditor({ project }: { project: Project }) {
                           })
                         }
                       />
-                    </label>
-                    <div className="grid gap-2">
-                      <label className="space-y-1">
-                        <span className="text-[9px] uppercase tracking-[0.14em] text-textSoft">Reason</span>
-                        <input
-                          className="surface-chip w-full px-2.5 py-1.5 text-[12px] text-textStrong"
+                    </FieldLabelWrap>
+                    <FieldGroup>
+                      <FieldLabelWrap>
+                        <FieldLabel>Reason</FieldLabel>
+                        <Input
                           value={editor.mock.responseReasonPhrase}
                           onChange={(event) =>
                             setEditor({
@@ -708,12 +640,11 @@ export function ProjectMocksEditor({ project }: { project: Project }) {
                             })
                           }
                         />
-                      </label>
-                      <label className="space-y-1">
-                        <span className="text-[9px] uppercase tracking-[0.14em] text-textSoft">Notas</span>
-                        <textarea
+                      </FieldLabelWrap>
+                      <FieldLabelWrap>
+                        <FieldLabel>Notas</FieldLabel>
+                        <Textarea
                           rows={4}
-                          className="surface-chip w-full px-2.5 py-1.5 text-[12px] text-textStrong"
                           value={editor.mock.notes ?? ""}
                           onChange={(event) =>
                             setEditor({
@@ -722,8 +653,8 @@ export function ProjectMocksEditor({ project }: { project: Project }) {
                             })
                           }
                         />
-                      </label>
-                    </div>
+                      </FieldLabelWrap>
+                    </FieldGroup>
                   </div>
 
                   {error ? <p className="text-[11px] text-danger">{error}</p> : null}
@@ -731,8 +662,11 @@ export function ProjectMocksEditor({ project }: { project: Project }) {
               </div>
             </>
           ) : (
-            <div className="flex h-full min-h-[220px] items-center justify-center px-4 text-[12px] text-textMuted">
-              Selecciona un mock en la lista o crea uno nuevo.
+            <div className="flex h-full min-h-[220px] items-center justify-center px-4">
+              <EmptyState
+                title="Selecciona un mock"
+                description="Elige un item de la lista o crea uno nuevo para editar request, headers y response."
+              />
             </div>
           )}
         </section>

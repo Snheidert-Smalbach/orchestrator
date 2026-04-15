@@ -17,6 +17,9 @@
   --color-danger: 248 113 113;
   --color-info: 35 213 246;
   --shadow-color: 2 10 24;
+  --radius-lg: 22px;
+  --radius-md: 16px;
+  --radius-sm: 12px;
   --app-background:
     radial-gradient(circle at 18% 18%, rgb(35 213 246 / 0.2), transparent 24%),
     radial-gradient(circle at 82% 18%, rgb(139 255 77 / 0.12), transparent 20%),
@@ -315,7 +318,7 @@ body {
   position: relative;
   min-height: 100vh;
   font-family: var(--font-sans);
-  background: rgb(var(--color-ink));
+  background: var(--app-background);
   color: rgb(var(--color-text-strong));
   transition: background 220ms ease, color 180ms ease;
   overflow: hidden;
@@ -382,11 +385,21 @@ button:disabled {
 }
 
 button,
+[class*="ui-button"],
+[class*="ui-badge"],
+[class*="ui-card"],
+.surface-chip {
+  border-radius: var(--radius-md);
+}
+
 input,
 textarea,
-select,
-[class*="rounded"] {
-  border-radius: 0 !important;
+select {
+  border-radius: var(--radius-md);
+}
+
+[class~="rounded-full"] {
+  border-radius: 9999px !important;
 }
 
 input,
@@ -453,15 +466,25 @@ input[type="checkbox"]:disabled {
 }
 
 .surface-panel {
-  background: rgb(var(--color-panel));
-  box-shadow: 0 20px 40px -34px rgb(var(--shadow-color) / 0.96);
-  backdrop-filter: none;
+  border: 1px solid rgb(var(--color-line) / 0.14);
+  border-radius: var(--radius-lg);
+  background:
+    linear-gradient(180deg, rgb(var(--color-panel) / 0.96), rgb(var(--color-panel) / 0.92));
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 0.05),
+    0 20px 40px -34px rgb(var(--shadow-color) / 0.96);
+  backdrop-filter: blur(14px);
 }
 
 .surface-panel-soft {
-  background: rgb(var(--color-panel-soft));
-  box-shadow: 0 16px 34px -30px rgb(var(--shadow-color) / 0.94);
-  backdrop-filter: none;
+  border: 1px solid rgb(var(--color-line) / 0.12);
+  border-radius: calc(var(--radius-lg) - 4px);
+  background:
+    linear-gradient(180deg, rgb(var(--color-panel-soft) / 0.94), rgb(var(--color-panel-soft) / 0.88));
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 0.04),
+    0 16px 34px -30px rgb(var(--shadow-color) / 0.94);
+  backdrop-filter: blur(10px);
 }
 
 .surface-divider {
@@ -473,8 +496,11 @@ input[type="checkbox"]:disabled {
 }
 
 .surface-chip {
-  background: rgb(var(--color-panel-soft));
-  box-shadow: 0 10px 22px -22px rgb(var(--shadow-color) / 0.92);
+  border: 1px solid rgb(var(--color-line) / 0.14);
+  background: rgb(var(--color-panel-soft) / 0.82);
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 0.04),
+    0 10px 22px -22px rgb(var(--shadow-color) / 0.92);
 }
 
 .surface-banner-warn {
@@ -539,22 +565,4 @@ input[type="checkbox"]:disabled {
 
 .scrollbar-thin::-webkit-scrollbar-thumb {
   background: rgb(var(--color-line) / 0.45);
-}
-:root,
-:root[data-theme-family][data-theme-mode] {
-  --app-background: rgb(var(--color-ink));
-  --app-overlay: none;
-  --app-pattern: none;
-  --app-pattern-size: auto;
-  --app-pattern-opacity: 0;
-}
-
-body {
-  background: rgb(var(--color-ink));
-}
-
-body::before,
-body::after {
-  content: none;
-  display: none;
 }

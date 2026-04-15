@@ -1,4 +1,3 @@
-﻿import * as Dialog from "@radix-ui/react-dialog";
 import {
   Boxes,
   ChevronDown,
@@ -12,11 +11,15 @@ import {
   Square,
   Trash2,
   TriangleAlert,
-  X,
 } from "lucide-react";
 import { Fragment, useEffect, useMemo, useState } from "react";
 import type { Project, ProjectResourceUsage } from "../lib/types";
 import { StatusPill } from "./status-pill";
+import { Badge } from "./ui/badge";
+import { Button } from "./ui/button";
+import { DialogShell } from "./ui/dialog-shell";
+import { EmptyState } from "./ui/empty-state";
+import { Checkbox } from "./ui/checkbox";
 
 interface ProjectListProps {
   projects: Project[];
@@ -113,49 +116,51 @@ const bulkActions: Array<{
   id: string;
   label: string;
   description: string;
-  tone: string;
-  onRun: (props: Pick<ProjectListProps, "onBulkStartVisible" | "onBulkStartVisibleAsMode" | "onBulkStopVisible" | "onBulkForceStopVisible">) => void;
+  variant: "success" | "default" | "warning" | "secondary" | "destructive";
+  onRun: (
+    props: Pick<ProjectListProps, "onBulkStartVisible" | "onBulkStartVisibleAsMode" | "onBulkStopVisible" | "onBulkForceStopVisible">,
+  ) => void;
 }> = [
   {
     id: "start-visible",
     label: "Iniciar visibles",
     description: "Arranca los proyectos visibles con el modo que ya tenga cada uno.",
-    tone: "border-ok/35 bg-ok/12 text-ok",
+    variant: "success",
     onRun: ({ onBulkStartVisible }) => onBulkStartVisible(),
   },
   {
     id: "start-service",
     label: "Iniciar como service",
     description: "Guarda service para los visibles y luego los arranca en lote.",
-    tone: "border-accent/35 bg-accent/10 text-accent",
+    variant: "default",
     onRun: ({ onBulkStartVisibleAsMode }) => onBulkStartVisibleAsMode("service"),
   },
   {
     id: "start-record",
     label: "Iniciar como record",
-    description: "Guarda record para los visibles y los levanta grabando trafico.",
-    tone: "border-warn/35 bg-warn/12 text-warn",
+    description: "Guarda record para los visibles y los levanta grabando tráfico.",
+    variant: "warning",
     onRun: ({ onBulkStartVisibleAsMode }) => onBulkStartVisibleAsMode("record"),
   },
   {
     id: "start-mock",
     label: "Iniciar como mock",
     description: "Guarda mock para los visibles y los levanta respondiendo desde capturas.",
-    tone: "border-accent/35 bg-accent/10 text-accent",
+    variant: "default",
     onRun: ({ onBulkStartVisibleAsMode }) => onBulkStartVisibleAsMode("mock"),
   },
   {
     id: "stop-visible",
     label: "Detener visibles",
-    description: "Solicita el stop normal para todos los proyectos visibles del catalogo.",
-    tone: "border-line bg-panelSoft/70 text-textStrong",
+    description: "Solicita el stop normal para todos los proyectos visibles del catálogo.",
+    variant: "secondary",
     onRun: ({ onBulkStopVisible }) => onBulkStopVisible(),
   },
   {
     id: "force-visible",
     label: "Forzar visibles",
-    description: "Ejecuta detencion forzada sobre los proyectos visibles cuando haga falta.",
-    tone: "border-danger/35 bg-danger/12 text-danger",
+    description: "Ejecuta detención forzada sobre los proyectos visibles cuando haga falta.",
+    variant: "destructive",
     onRun: ({ onBulkForceStopVisible }) => onBulkForceStopVisible(),
   },
 ];
@@ -290,48 +295,53 @@ export function ProjectList({
 
   return (
     <div className="surface-panel flex h-full min-h-0 flex-col overflow-hidden">
-      <div className="surface-divider flex flex-wrap items-center justify-between gap-2 px-3 py-2.5">
+      <div className="surface-divider flex flex-wrap items-center justify-between gap-2 px-3 py-3">
         <div>
-          <p className="text-[9px] uppercase tracking-[0.22em] text-textSoft">Catalogo</p>
+          <p className="text-[9px] uppercase tracking-[0.22em] text-textSoft">Catálogo</p>
           <h2 className="mt-0.5 text-[13px] font-semibold text-textStrong">Servicios configurados</h2>
         </div>
         <div className="flex flex-wrap items-center gap-1.5">
-          <button
+          <Button
             type="button"
-            className="surface-chip inline-flex items-center gap-1.5 px-2 py-1.5 text-[10px] font-semibold text-textStrong"
+            variant="secondary"
+            size="sm"
             onClick={() => setIsBulkDialogOpen(true)}
             disabled={!projects.length || isBusy}
-            title="Acciones masivas sobre los proyectos visibles del catalogo"
+            title="Acciones masivas sobre los proyectos visibles del catálogo"
           >
             <Boxes className="h-3.5 w-3.5" />
             Lote
-          </button>
-          <button
+          </Button>
+          <Button
             type="button"
-            className="surface-chip inline-flex items-center gap-1.5 px-2 py-1.5 text-[10px] font-semibold text-textStrong"
+            variant="secondary"
+            size="sm"
             onClick={onOpenScanDialog}
             disabled={isBusy}
             title="Escanear una carpeta base e importar varios servicios"
           >
             <FolderSearch className="h-3.5 w-3.5" />
             Escanear
-          </button>
-          <button
+          </Button>
+          <Button
             type="button"
-            className="inline-flex items-center gap-1.5 border border-accent/40 bg-accent/10 px-2 py-1.5 text-[10px] font-semibold text-accent disabled:cursor-not-allowed disabled:opacity-60"
+            variant="default"
+            size="sm"
             onClick={() => void onImportProject()}
             disabled={isBusy}
-            title="Seleccionar una carpeta e importarla al catalogo"
+            title="Seleccionar una carpeta e importarla al catálogo"
           >
             {isBusy ? <LoaderCircle className="h-3.5 w-3.5 animate-spin" /> : <FolderPlus className="h-3.5 w-3.5" />}
             Agregar carpeta
-          </button>
-          <span className="surface-chip px-2 py-1 text-[10px] text-textMuted">{projects.length} visibles</span>
+          </Button>
+          <Badge variant="secondary" className="px-2 py-1 text-[10px]">
+            {projects.length} visibles
+          </Badge>
         </div>
       </div>
 
       <div className="min-h-0 flex-1 overflow-auto scrollbar-thin px-2 pb-2">
-        <table className="min-w-full border-separate border-spacing-y-1 text-[11px]">
+        <table className="ui-data-table min-w-full border-separate border-spacing-y-1 text-[11px]">
           <thead className="sticky top-0 z-10 bg-panel/88 backdrop-blur-xl">
             <tr className="text-left text-[9px] uppercase tracking-[0.16em] text-textSoft shadow-[inset_0_-1px_0_rgb(var(--color-line)/0.14)]">
               <th className="w-[44px] px-2 py-2">Run</th>
@@ -345,274 +355,271 @@ export function ProjectList({
             </tr>
           </thead>
           <tbody>
-            {projects.map((project) => {
-              const isSelected = project.id === selectedProjectId;
-              const hasConflict = conflictedProjectIds.has(project.id);
-              const canForceStop = forceStopSet.has(project.id);
-              const canForceStart = forceStartSet.has(project.id);
-              const showForceStopAction = canForceStop || ["starting", "running", "ready", "failed"].includes(project.status);
-              const showForceStopWarning = canForceStop;
-              const isExpanded = expandedProjectIds[project.id] ?? false;
-              const resourceUsage = projectResources[project.id];
-              const isDropBefore = dropTarget?.projectId === project.id && dropTarget.position === "before";
-              const isDropAfter = dropTarget?.projectId === project.id && dropTarget.position === "after";
+            {projects.length ? (
+              projects.map((project) => {
+                const isSelected = project.id === selectedProjectId;
+                const hasConflict = conflictedProjectIds.has(project.id);
+                const canForceStop = forceStopSet.has(project.id);
+                const canForceStart = forceStartSet.has(project.id);
+                const showForceStopAction = canForceStop || ["starting", "running", "ready", "failed"].includes(project.status);
+                const showForceStopWarning = canForceStop;
+                const isExpanded = expandedProjectIds[project.id] ?? false;
+                const resourceUsage = projectResources[project.id];
+                const isDropBefore = dropTarget?.projectId === project.id && dropTarget.position === "before";
+                const isDropAfter = dropTarget?.projectId === project.id && dropTarget.position === "after";
 
-              return (
-                <Fragment key={project.id}>
-                  <tr
-                    data-project-row={project.id}
-                    className={[
-                      "cursor-pointer transition-[background,opacity] duration-150",
-                      rowToneByStatus[project.status],
-                      draggedProjectId === project.id ? "opacity-55" : "",
-                      project.enabled ? "" : "opacity-60",
-                    ].join(" ")}
-                    style={buildRowStyle({
-                      status: project.status,
-                      isSelected,
-                      hasConflict,
-                      canForceStop,
-                      canForceStart,
-                      isDropBefore,
-                      isDropAfter,
-                    })}
-                    onClick={() => onSelect(project.id)}
-                  >
-                    <td className="px-2 py-2.5 align-middle">
-                      <input
-                        type="checkbox"
-                        checked={project.enabled}
-                        onChange={(event) => {
-                          event.stopPropagation();
-                          onToggleEnabled(project, event.target.checked);
-                        }}
-                        onClick={(event) => event.stopPropagation()}
-                        title="Incluir en Iniciar habilitados"
-                      />
-                    </td>
-                    <td className="px-2 py-2.5 align-middle">
-                      <div className="flex min-w-0 items-center gap-1.5">
-                        <button
-                          type="button"
-                          className="surface-chip cursor-grab p-0.5 text-textMuted transition hover:bg-panelSoft/70 active:cursor-grabbing"
-                          onPointerDown={(event) => {
-                            event.preventDefault();
+                return (
+                  <Fragment key={project.id}>
+                    <tr
+                      data-project-row={project.id}
+                      className={[
+                        "cursor-pointer transition-[background,opacity] duration-150",
+                        rowToneByStatus[project.status],
+                        draggedProjectId === project.id ? "opacity-55" : "",
+                        project.enabled ? "" : "opacity-60",
+                      ].join(" ")}
+                      style={buildRowStyle({
+                        status: project.status,
+                        isSelected,
+                        hasConflict,
+                        canForceStop,
+                        canForceStart,
+                        isDropBefore,
+                        isDropAfter,
+                      })}
+                      onClick={() => onSelect(project.id)}
+                    >
+                      <td className="px-2 py-2.5 align-middle">
+                        <Checkbox
+                          checked={project.enabled}
+                          onChange={(event) => {
                             event.stopPropagation();
-                            setDraggedProjectId(project.id);
+                            onToggleEnabled(project, event.currentTarget.checked);
                           }}
                           onClick={(event) => event.stopPropagation()}
-                          title="Arrastrar para cambiar el orden de arranque"
-                        >
-                          <GripVertical className="h-3 w-3" />
-                        </button>
-                        <button
-                          type="button"
-                          className="surface-chip p-0.5 text-textMuted transition hover:bg-panelSoft/70"
-                          onClick={(event) => {
-                            event.stopPropagation();
-                            toggleExpanded(project.id);
-                          }}
-                          title={isExpanded ? "Ocultar detalle" : "Mostrar detalle"}
-                        >
-                          {isExpanded ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
-                        </button>
-                        <div className="min-w-0">
-                          <div className="flex min-w-0 items-center gap-1.5">
-                            <span className={["h-5 w-1.5 shrink-0", markerToneByStatus[project.status]].join(" ")} />
-                            <p className="truncate text-[11px] font-semibold leading-4 text-textStrong">{project.name}</p>
-                            <span className="surface-chip shrink-0 px-1.5 py-0.5 text-[9px] uppercase tracking-[0.14em] text-textMuted">
-                              {launchModeLabel[project.launchMode]}
-                            </span>
-                            {hasConflict ? <TriangleAlert className="h-3.5 w-3.5 shrink-0 text-warn" /> : null}
-                            {canForceStart ? <Rocket className="h-3.5 w-3.5 shrink-0 text-warn" /> : null}
-                            {!canForceStart && showForceStopWarning ? <TriangleAlert className="h-3.5 w-3.5 shrink-0 text-danger" /> : null}
-                          </div>
-                        </div>
-                      </div>
-                    </td>
-                    <td className="px-2 py-2.5 align-middle text-[11px] leading-4 text-textStrong">{project.port ?? "n/a"}</td>
-                    <td className="px-2 py-2.5 align-middle">
-                      <span
-                        className={[
-                          "inline-flex min-w-[44px] items-center justify-center border px-1.5 py-0.5 text-[10px] font-semibold",
-                          project.mockSummary.totalCount
-                            ? "border-accent/35 bg-accent/10 text-accent"
-                            : "border-line bg-panelSoft/70 text-textSoft",
-                        ].join(" ")}
-                      >
-                        {project.mockSummary.totalCount}
-                      </span>
-                    </td>
-                    <td className="px-2 py-2.5 align-middle text-[11px] leading-4 text-textStrong">{project.catalogOrder}</td>
-                    <td className="px-2 py-2.5 align-middle">
-                      <input
-                        type="checkbox"
-                        checked={project.waitForPreviousReady}
-                        onChange={(event) => {
-                          event.stopPropagation();
-                          onToggleWaitForPreviousReady(project, event.target.checked);
-                        }}
-                        onClick={(event) => event.stopPropagation()}
-                        title="Esperar a que el servicio anterior quede ready antes de iniciar este"
-                      />
-                    </td>
-                    <td className="px-2 py-2.5 align-middle">
-                      <StatusPill status={project.status} />
-                    </td>
-                    <td className="px-2 py-2.5 align-middle">
-                      <div className="flex gap-1">
-                        <button
-                          type="button"
-                          className="bg-ok/14 p-1 text-ok shadow-[inset_0_0_0_1px_rgba(34,197,94,0.18)] transition hover:bg-ok/22"
-                          onClick={(event) => {
-                            event.stopPropagation();
-                            onStartProject(project.id);
-                          }}
-                          title="Iniciar proyecto"
-                        >
-                          <Play className="h-3 w-3" />
-                        </button>
-                        <button
-                          type="button"
-                          className="surface-chip p-1 text-textStrong transition hover:bg-panelSoft/72"
-                          onClick={(event) => {
-                            event.stopPropagation();
-                            onStopProject(project.id);
-                          }}
-                          title="Detener proyecto"
-                        >
-                          <Square className="h-3 w-3" />
-                        </button>
-                        {canForceStart ? (
+                          title="Incluir en Iniciar habilitados"
+                        />
+                      </td>
+                      <td className="px-2 py-2.5 align-middle">
+                        <div className="flex min-w-0 items-center gap-1.5">
                           <button
                             type="button"
-                            className="bg-warn/14 px-2 py-1 text-[10px] font-semibold text-warn shadow-[inset_0_0_0_1px_rgba(250,204,21,0.2)] transition hover:bg-warn/22"
-                            onClick={(event) => {
+                            className="surface-chip cursor-grab p-1 text-textMuted transition hover:bg-panelSoft/70 active:cursor-grabbing"
+                            onPointerDown={(event) => {
+                              event.preventDefault();
                               event.stopPropagation();
-                              onForceStartProject(project.id);
+                              setDraggedProjectId(project.id);
                             }}
-                            title="Liberar puerto y volver a iniciar el proyecto"
+                            onClick={(event) => event.stopPropagation()}
+                            title="Arrastrar para cambiar el orden de arranque"
                           >
-                            Forzar e iniciar
+                            <GripVertical className="h-3 w-3" />
                           </button>
-                        ) : null}
-                        {!canForceStart && showForceStopAction ? (
                           <button
                             type="button"
-                            className="bg-danger/14 px-2 py-1 text-[10px] font-semibold text-danger shadow-[inset_0_0_0_1px_rgba(248,113,113,0.2)] transition hover:bg-danger/22"
+                            className="surface-chip p-1 text-textMuted transition hover:bg-panelSoft/70"
                             onClick={(event) => {
                               event.stopPropagation();
-                              onForceStopProject(project.id);
+                              toggleExpanded(project.id);
                             }}
-                            title="Forzar detencion del proyecto"
+                            title={isExpanded ? "Ocultar detalle" : "Mostrar detalle"}
                           >
-                            Forzar
+                            {isExpanded ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
                           </button>
-                        ) : null}
-                        <button
-                          type="button"
-                          className="surface-chip p-1 text-danger transition hover:bg-danger/18"
-                          onClick={(event) => {
-                            event.stopPropagation();
-                            onDeleteProject(project.id);
-                          }}
-                          title="Quitar servicio del catalogo importado"
-                        >
-                          <Trash2 className="h-3 w-3" />
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-
-                  {isExpanded ? (
-                    <tr className={project.enabled ? "" : "opacity-60"}>
-                      <td colSpan={8} className="px-2 pb-1.5 pt-0.5">
-                        <div className="surface-panel-soft grid gap-1.5 px-2 py-1.5 text-[10px] leading-4 text-textMuted md:grid-cols-[minmax(0,1.9fr)_minmax(0,1.15fr)_minmax(0,1fr)]">
                           <div className="min-w-0">
-                            <p className="text-[9px] uppercase tracking-[0.14em] text-textSoft">Ruta</p>
-                            <p className="truncate text-textMuted" title={project.rootPath}>{project.rootPath}</p>
-                          </div>
-                          <div className="min-w-0">
-                            <p className="text-[9px] uppercase tracking-[0.14em] text-textSoft">Run target</p>
-                            <p className="truncate text-textMuted" title={project.runTarget}>
-                              {project.packageManager} / {project.runMode === "script" ? "script" : "command"} / {project.runTarget}
-                            </p>
-                          </div>
-                          <div className="min-w-0">
-                            <p className="text-[9px] uppercase tracking-[0.14em] text-textSoft">.env</p>
-                            <p className="truncate text-textMuted" title={project.selectedEnvFile ?? "Sin .env"}>
-                              {project.selectedEnvFile ?? "Sin .env"}
-                            </p>
-                          </div>
-                          <div className="min-w-0">
-                            <p className="text-[9px] uppercase tracking-[0.14em] text-textSoft">Arranque</p>
-                            <p className="truncate text-textMuted" title={`Orden ${project.catalogOrder} · fase ${project.startupPhase}`}>
-                              #{project.catalogOrder} / fase {project.startupPhase} / {project.launchMode} / {project.waitForPreviousReady ? "espera ready del anterior" : "sin espera"}
-                            </p>
-                          </div>
-                          <div className="min-w-0">
-                            <p className="text-[9px] uppercase tracking-[0.14em] text-textSoft">Recursos</p>
-                            {resourceUsage ? (
-                              <p className="truncate text-textMuted" title={resourceUsage.commandPreview ?? "Sin comando"}>
-                                PID {resourceUsage.trackedPid ?? "n/a"} / {resourceUsage.totalProcesses} proc / {resourceUsage.totalWorkingSetMb.toFixed(1)} MB
-                              </p>
-                            ) : (
-                              <p className="truncate text-textMuted">Sin proceso rastreado</p>
-                            )}
+                            <div className="flex min-w-0 items-center gap-1.5">
+                              <span className={["h-5 w-1.5 shrink-0 rounded-full", markerToneByStatus[project.status]].join(" ")} />
+                              <p className="truncate text-[11px] font-semibold leading-4 text-textStrong">{project.name}</p>
+                              <Badge variant="secondary" className="shrink-0 px-1.5 py-0.5 text-[9px]">
+                                {launchModeLabel[project.launchMode]}
+                              </Badge>
+                              {hasConflict ? <TriangleAlert className="h-3.5 w-3.5 shrink-0 text-warn" /> : null}
+                              {canForceStart ? <Rocket className="h-3.5 w-3.5 shrink-0 text-warn" /> : null}
+                              {!canForceStart && showForceStopWarning ? <TriangleAlert className="h-3.5 w-3.5 shrink-0 text-danger" /> : null}
+                            </div>
                           </div>
                         </div>
                       </td>
+                      <td className="px-2 py-2.5 align-middle text-[11px] leading-4 text-textStrong">{project.port ?? "n/a"}</td>
+                      <td className="px-2 py-2.5 align-middle">
+                        <Badge variant={project.mockSummary.totalCount ? "info" : "secondary"} className="min-w-[44px] justify-center px-1.5 py-0.5 text-[10px]">
+                          {project.mockSummary.totalCount}
+                        </Badge>
+                      </td>
+                      <td className="px-2 py-2.5 align-middle text-[11px] leading-4 text-textStrong">{project.catalogOrder}</td>
+                      <td className="px-2 py-2.5 align-middle">
+                        <Checkbox
+                          checked={project.waitForPreviousReady}
+                          onChange={(event) => {
+                            event.stopPropagation();
+                            onToggleWaitForPreviousReady(project, event.currentTarget.checked);
+                          }}
+                          onClick={(event) => event.stopPropagation()}
+                          title="Esperar a que el servicio anterior quede ready antes de iniciar este"
+                        />
+                      </td>
+                      <td className="px-2 py-2.5 align-middle">
+                        <StatusPill status={project.status} />
+                      </td>
+                      <td className="px-2 py-2.5 align-middle">
+                        <div className="flex flex-wrap gap-1">
+                          <Button
+                            type="button"
+                            variant="success"
+                            size="sm"
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              onStartProject(project.id);
+                            }}
+                            title="Iniciar proyecto"
+                          >
+                            <Play className="h-3 w-3" />
+                          </Button>
+                          <Button
+                            type="button"
+                            variant="secondary"
+                            size="sm"
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              onStopProject(project.id);
+                            }}
+                            title="Detener proyecto"
+                          >
+                            <Square className="h-3 w-3" />
+                          </Button>
+                          {canForceStart ? (
+                            <Button
+                              type="button"
+                              variant="warning"
+                              size="sm"
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                onForceStartProject(project.id);
+                              }}
+                              title="Liberar puerto y volver a iniciar el proyecto"
+                            >
+                              Forzar e iniciar
+                            </Button>
+                          ) : null}
+                          {!canForceStart && showForceStopAction ? (
+                            <Button
+                              type="button"
+                              variant="destructive"
+                              size="sm"
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                onForceStopProject(project.id);
+                              }}
+                              title="Forzar detención del proyecto"
+                            >
+                              Forzar
+                            </Button>
+                          ) : null}
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            className="text-danger"
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              onDeleteProject(project.id);
+                            }}
+                            title="Quitar servicio del catálogo importado"
+                          >
+                            <Trash2 className="h-3 w-3" />
+                          </Button>
+                        </div>
+                      </td>
                     </tr>
-                  ) : null}
-                </Fragment>
-              );
-            })}
+
+                    {isExpanded ? (
+                      <tr className={project.enabled ? "" : "opacity-60"}>
+                        <td colSpan={8} className="px-2 pb-1.5 pt-0.5">
+                          <div className="surface-panel-soft grid gap-1.5 px-2 py-1.5 text-[10px] leading-4 text-textMuted md:grid-cols-[minmax(0,1.9fr)_minmax(0,1.15fr)_minmax(0,1fr)]">
+                            <div className="min-w-0">
+                              <p className="text-[9px] uppercase tracking-[0.14em] text-textSoft">Ruta</p>
+                              <p className="truncate text-textMuted" title={project.rootPath}>
+                                {project.rootPath}
+                              </p>
+                            </div>
+                            <div className="min-w-0">
+                              <p className="text-[9px] uppercase tracking-[0.14em] text-textSoft">Run target</p>
+                              <p className="truncate text-textMuted" title={project.runTarget}>
+                                {project.packageManager} / {project.runMode === "script" ? "script" : "command"} / {project.runTarget}
+                              </p>
+                            </div>
+                            <div className="min-w-0">
+                              <p className="text-[9px] uppercase tracking-[0.14em] text-textSoft">.env</p>
+                              <p className="truncate text-textMuted" title={project.selectedEnvFile ?? "Sin .env"}>
+                                {project.selectedEnvFile ?? "Sin .env"}
+                              </p>
+                            </div>
+                            <div className="min-w-0">
+                              <p className="text-[9px] uppercase tracking-[0.14em] text-textSoft">Arranque</p>
+                              <p className="truncate text-textMuted" title={`Orden ${project.catalogOrder} · fase ${project.startupPhase}`}>
+                                #{project.catalogOrder} / fase {project.startupPhase} / {project.launchMode} / {project.waitForPreviousReady ? "espera ready del anterior" : "sin espera"}
+                              </p>
+                            </div>
+                            <div className="min-w-0">
+                              <p className="text-[9px] uppercase tracking-[0.14em] text-textSoft">Recursos</p>
+                              {resourceUsage ? (
+                                <p className="truncate text-textMuted" title={resourceUsage.commandPreview ?? "Sin comando"}>
+                                  PID {resourceUsage.trackedPid ?? "n/a"} / {resourceUsage.totalProcesses} proc / {resourceUsage.totalWorkingSetMb.toFixed(1)} MB
+                                </p>
+                              ) : (
+                                <p className="truncate text-textMuted">Sin proceso rastreado</p>
+                              )}
+                            </div>
+                          </div>
+                        </td>
+                      </tr>
+                    ) : null}
+                  </Fragment>
+                );
+              })
+            ) : (
+              <tr>
+                <td colSpan={8} className="px-2 py-6">
+                  <EmptyState
+                    title="No hay proyectos visibles"
+                    description="Importa una carpeta o ejecuta un escaneo para poblar el catálogo."
+                  />
+                </td>
+              </tr>
+            )}
           </tbody>
         </table>
       </div>
 
-      <Dialog.Root open={isBulkDialogOpen} onOpenChange={setIsBulkDialogOpen}>
-        <Dialog.Portal>
-          <Dialog.Overlay className="fixed inset-0 z-40 bg-ink/62 backdrop-blur-sm" />
-          <Dialog.Content className="surface-panel fixed left-1/2 top-1/2 z-50 max-h-[82vh] w-[min(760px,92vw)] -translate-x-1/2 -translate-y-1/2 overflow-hidden">
-            <div className="surface-divider flex items-center justify-between px-5 py-4">
-              <div>
-                <Dialog.Title className="text-[15px] font-semibold text-textStrong">Acciones del catalogo</Dialog.Title>
-                <Dialog.Description className="mt-1 text-[11px] text-textMuted">
-                  Ejecuta cambios masivos sobre los {projects.length} proyectos visibles sin ir uno por uno.
-                </Dialog.Description>
-              </div>
-              <Dialog.Close className="surface-chip p-2 text-textStrong transition hover:bg-panelSoft">
-                <X className="h-4 w-4" />
-              </Dialog.Close>
-            </div>
-
-            <div className="grid gap-2 p-5 md:grid-cols-2">
-              {bulkActions.map((action) => (
-                <button
-                  key={action.id}
-                  type="button"
-                  className={["border px-3 py-3 text-left transition hover:-translate-y-0", action.tone].join(" ")}
-                  onClick={() => {
-                    setIsBulkDialogOpen(false);
-                    action.onRun({
-                      onBulkStartVisible,
-                      onBulkStartVisibleAsMode,
-                      onBulkStopVisible,
-                      onBulkForceStopVisible,
-                    });
-                  }}
-                  disabled={!projects.length || isBusy}
-                >
-                  <span className="block text-[11px] font-semibold uppercase tracking-[0.12em]">{action.label}</span>
-                  <span className="mt-1 block text-[11px] leading-5 text-current/80">{action.description}</span>
-                </button>
-              ))}
-            </div>
-          </Dialog.Content>
-        </Dialog.Portal>
-      </Dialog.Root>
+      <DialogShell
+        open={isBulkDialogOpen}
+        onOpenChange={setIsBulkDialogOpen}
+        title="Acciones del catálogo"
+        description={`Ejecuta cambios masivos sobre los ${projects.length} proyectos visibles sin ir uno por uno.`}
+      >
+        <div className="grid gap-2 md:grid-cols-2">
+          {bulkActions.map((action) => (
+            <button
+              key={action.id}
+              type="button"
+              className={`ui-bulk-action-card ui-bulk-action-card--${action.variant}`}
+              onClick={() => {
+                setIsBulkDialogOpen(false);
+                action.onRun({
+                  onBulkStartVisible,
+                  onBulkStartVisibleAsMode,
+                  onBulkStopVisible,
+                  onBulkForceStopVisible,
+                });
+              }}
+              disabled={!projects.length || isBusy}
+            >
+              <span className="block text-[11px] font-semibold uppercase tracking-[0.12em]">{action.label}</span>
+              <span className="mt-1 block text-[11px] leading-5 text-current/80">{action.description}</span>
+            </button>
+          ))}
+        </div>
+      </DialogShell>
     </div>
   );
 }
-

@@ -4,6 +4,16 @@ import { inspectProject } from "../lib/tauri";
 import type { DetectedProject, Preset, Project, ProjectEnvOverride, ProjectResourceUsage } from "../lib/types";
 import { ProjectMocksEditor } from "./project-mocks-editor";
 import { StatusPill } from "./status-pill";
+import { Badge } from "./ui/badge";
+import { Button } from "./ui/button";
+import { Card } from "./ui/card";
+import { Checkbox } from "./ui/checkbox";
+import { EmptyState } from "./ui/empty-state";
+import { FieldGroup, FieldHint, FieldLabel, FieldLabelWrap, FieldRow } from "./ui/field";
+import { Input } from "./ui/input";
+import { Select } from "./ui/select";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "./ui/tabs";
+import { Textarea } from "./ui/textarea";
 
 type SaveOptions = {
   quiet?: boolean;
@@ -88,10 +98,7 @@ function mergeProjectWithMetadata(
 ) {
   const shouldReplaceScript =
     project.runMode === "script" &&
-    (
-      !project.runTarget ||
-      (detected.availableScripts.length > 0 && !detected.availableScripts.includes(project.runTarget))
-    );
+    (!project.runTarget || (detected.availableScripts.length > 0 && !detected.availableScripts.includes(project.runTarget)));
 
   const selectedEnvFile =
     options?.selectedEnvFile !== undefined
@@ -222,10 +229,7 @@ export function ProjectDetail({
     setMetadataError(null);
 
     try {
-      const detected = await inspectProject(
-        baseProject.rootPath,
-        options?.preferredEnvFile ?? baseProject.selectedEnvFile,
-      );
+      const detected = await inspectProject(baseProject.rootPath, options?.preferredEnvFile ?? baseProject.selectedEnvFile);
       setDraft((current) => {
         if (!current || current.id !== baseProject.id) {
           return current;
@@ -237,9 +241,7 @@ export function ProjectDetail({
         });
       });
     } catch (error) {
-      setMetadataError(
-        error instanceof Error ? error.message : "No fue posible releer scripts y variables del proyecto.",
-      );
+      setMetadataError(error instanceof Error ? error.message : "No fue posible releer scripts y variables del proyecto.");
     } finally {
       setIsRefreshing(false);
     }
@@ -308,8 +310,11 @@ export function ProjectDetail({
 
   if (!draft) {
     return (
-      <div className="surface-panel p-5 text-sm text-textMuted">
-        Selecciona un proyecto para editar su configuracion.
+      <div className="surface-panel flex h-full items-center justify-center p-5">
+        <EmptyState
+          title="Selecciona un proyecto"
+          description="El detalle de configuración, dependencias, workspaces y mocks aparece cuando eliges un servicio del catálogo."
+        />
       </div>
     );
   }
@@ -317,8 +322,6 @@ export function ProjectDetail({
   const otherProjects = allProjects.filter((entry) => entry.id !== draft.id);
   const editablePresets = presets.filter((preset) => !preset.readOnly);
   const scriptOptions = buildScriptOptions(draft);
-  const fieldClassName = "surface-chip w-full px-3 py-2 text-[13px] text-textStrong";
-  const compactFieldClassName = "surface-chip w-full px-2.5 py-1.5 text-[12px] text-textStrong";
   const showForceStopAction = canForceStop || ["starting", "running", "ready", "failed"].includes(draft.status);
   const showForceStopWarning = canForceStop;
   const saveHint =
@@ -349,21 +352,18 @@ export function ProjectDetail({
     await onStart(projectDraft.id);
   }
 
-  const tabButtonClassName = (tabId: DetailTabId) =>
-    [
-      "inline-flex items-center gap-1.5 border px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.12em] transition",
-      activeTab === tabId
-        ? "border-accent/40 bg-accent/10 text-accent"
-        : "surface-chip text-textMuted hover:bg-panelSoft/72",
-    ].join(" ");
-
   return (
-    <div className="surface-panel flex h-full min-h-0 flex-col overflow-hidden">
+    <Tabs
+      value={activeTab}
+      onValueChange={(value) => setActiveTab(value as DetailTabId)}
+      className="surface-panel flex h-full min-h-0 flex-col overflow-hidden"
+    >
       <div className="surface-divider flex flex-wrap items-start justify-between gap-3 px-4 py-3">
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2">
             <p className="text-[10px] uppercase tracking-[0.24em] text-textSoft">Detalle</p>
             <StatusPill status={draft.status} />
+            <Badge variant="secondary">{draft.runtimeKind}</Badge>
           </div>
           <h2 className="mt-1 truncate text-base font-semibold text-textStrong">{draft.name}</h2>
           <p className="mt-0.5 truncate text-[11px] text-textMuted">{draft.rootPath}</p>
@@ -380,7 +380,7 @@ export function ProjectDetail({
           {showForceStopWarning ? (
             <p className="mt-1 inline-flex items-center gap-1.5 text-[11px] text-danger">
               <TriangleAlert className="h-3 w-3" />
-              La detencion normal no libero el servicio. Puedes usar Forzar para matar el PID o liberar el puerto.
+              La detención normal no liberó el servicio. Puedes usar Forzar para matar el PID o liberar el puerto.
             </p>
           ) : null}
           {metadataError ? <p className="mt-1 text-[11px] text-danger">{metadataError}</p> : null}
@@ -388,325 +388,397 @@ export function ProjectDetail({
           {isRefreshing ? <p className="mt-1 text-[11px] text-textMuted">Leyendo metadata del proyecto...</p> : null}
         </div>
         <div className="flex flex-wrap items-center gap-1.5">
-          <button
-            className="surface-chip inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold text-textStrong"
+          <Button
+            type="button"
+            variant="secondary"
+            size="sm"
             onClick={() => void refreshMetadata(draft, { preferredEnvFile: draft.selectedEnvFile, preferDetectedPort: true })}
             disabled={isRefreshing}
           >
-            <RefreshCw className={["h-3.5 w-3.5", isRefreshing ? "animate-spin" : ""].join(" ")} /> Recargar
-          </button>
-          <button className="inline-flex items-center gap-1.5 border border-ok/40 bg-ok/12 px-3 py-2 text-xs font-semibold text-ok" onClick={() => void handleStart()}><Play className="h-3.5 w-3.5" /> Iniciar</button>
-          <button className="surface-chip inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold text-textStrong" onClick={() => void onStop(draft.id)}><Square className="h-3.5 w-3.5" /> Detener</button>
+            <RefreshCw className={["h-3.5 w-3.5", isRefreshing ? "animate-spin" : ""].join(" ")} />
+            Recargar
+          </Button>
+          <Button type="button" variant="success" size="sm" onClick={() => void handleStart()}>
+            <Play className="h-3.5 w-3.5" />
+            Iniciar
+          </Button>
+          <Button type="button" variant="secondary" size="sm" onClick={() => void onStop(draft.id)}>
+            <Square className="h-3.5 w-3.5" />
+            Detener
+          </Button>
           {canForceStart ? (
-            <button className="inline-flex items-center gap-1.5 border border-warn/40 bg-warn/12 px-3 py-2 text-xs font-semibold text-warn" onClick={() => void onForceStart(draft.id)}><Rocket className="h-3.5 w-3.5" /> Forzar e iniciar</button>
+            <Button type="button" variant="warning" size="sm" onClick={() => void onForceStart(draft.id)}>
+              <Rocket className="h-3.5 w-3.5" />
+              Forzar e iniciar
+            </Button>
           ) : null}
           {!canForceStart && showForceStopAction ? (
-            <button className="inline-flex items-center gap-1.5 border border-danger/40 bg-danger/12 px-3 py-2 text-xs font-semibold text-danger" onClick={() => void onForceStop(draft.id)}><TriangleAlert className="h-3.5 w-3.5" /> Forzar</button>
+            <Button type="button" variant="destructive" size="sm" onClick={() => void onForceStop(draft.id)}>
+              <TriangleAlert className="h-3.5 w-3.5" />
+              Forzar
+            </Button>
           ) : null}
         </div>
       </div>
 
-      <div className="surface-divider flex shrink-0 items-center gap-1.5 px-4 py-2">
-        <button type="button" className={tabButtonClassName("config")} onClick={() => setActiveTab("config")}>
-          Configuracion
-        </button>
-        <button type="button" className={tabButtonClassName("mocks")} onClick={() => setActiveTab("mocks")}>
-          Mocks
-          <span className="surface-chip px-1.5 py-0.5 text-[9px] text-textStrong">{draft.mockSummary.totalCount}</span>
-        </button>
+      <div className="surface-divider flex shrink-0 items-center gap-2 px-4 py-2">
+        <TabsList>
+          <TabsTrigger value="config">Configuración</TabsTrigger>
+          <TabsTrigger value="mocks">
+            Mocks
+            <Badge variant="secondary" className="px-1.5 py-0.5 text-[9px]">
+              {draft.mockSummary.totalCount}
+            </Badge>
+          </TabsTrigger>
+        </TabsList>
       </div>
 
-      {activeTab === "config" ? (
-      <div className="min-h-0 flex-1 overflow-auto"><div className="grid gap-3 p-4 [grid-template-columns:repeat(auto-fit,minmax(180px,1fr))]">
-        <label className="space-y-1.5">
-          <span className="text-[10px] uppercase tracking-[0.16em] text-textSoft">Nombre</span>
-          <input className={fieldClassName} value={draft.name} onChange={(event) => setDraft({ ...draft, name: event.target.value })} />
-        </label>
+      <TabsContent value="config" className="min-h-0 flex-1 overflow-auto">
+        <div className="grid gap-3 p-4 [grid-template-columns:repeat(auto-fit,minmax(180px,1fr))]">
+          <FieldLabelWrap>
+            <FieldLabel>Nombre</FieldLabel>
+            <Input value={draft.name} onChange={(event) => setDraft({ ...draft, name: event.target.value })} />
+          </FieldLabelWrap>
 
-        {draft.runMode === "script" && scriptOptions.length > 0 ? (
-          <label className="space-y-1.5">
-            <span className="text-[10px] uppercase tracking-[0.16em] text-textSoft">Script</span>
-            <select
-              className={fieldClassName}
-              value={draft.runTarget}
-              onChange={(event) => setDraft({ ...draft, runTarget: event.target.value })}
+          {draft.runMode === "script" && scriptOptions.length > 0 ? (
+            <FieldLabelWrap>
+              <FieldLabel>Script</FieldLabel>
+              <Select value={draft.runTarget} onChange={(event) => setDraft({ ...draft, runTarget: event.target.value })}>
+                {scriptOptions.map((script) => (
+                  <option key={script} value={script}>
+                    {script}
+                  </option>
+                ))}
+              </Select>
+            </FieldLabelWrap>
+          ) : (
+            <FieldLabelWrap>
+              <FieldLabel>Run target</FieldLabel>
+              <Input value={draft.runTarget} onChange={(event) => setDraft({ ...draft, runTarget: event.target.value })} />
+            </FieldLabelWrap>
+          )}
+
+          <FieldLabelWrap>
+            <FieldLabel>Modo</FieldLabel>
+            <Select
+              value={draft.runMode}
+              onChange={(event) => {
+                const nextRunMode = event.target.value as Project["runMode"];
+                setDraft({
+                  ...draft,
+                  runMode: nextRunMode,
+                  runTarget: nextRunMode === "script" ? draft.runTarget || draft.availableScripts[0] || "start:dev" : draft.runTarget,
+                });
+              }}
             >
-              {scriptOptions.map((script) => (
-                <option key={script} value={script}>
-                  {script}
+              <option value="script">Script</option>
+              <option value="command">Comando</option>
+            </Select>
+          </FieldLabelWrap>
+
+          <FieldLabelWrap>
+            <FieldLabel>Package manager</FieldLabel>
+            <Select
+              value={draft.packageManager}
+              onChange={(event) => setDraft({ ...draft, packageManager: event.target.value as Project["packageManager"] })}
+            >
+              <option value="npm">npm</option>
+              <option value="pnpm">pnpm</option>
+              <option value="yarn">yarn</option>
+              <option value="cargo">cargo</option>
+              <option value="unknown">unknown</option>
+            </Select>
+          </FieldLabelWrap>
+
+          <FieldLabelWrap>
+            <FieldLabel>.env</FieldLabel>
+            <Select
+              value={draft.selectedEnvFile ?? ""}
+              onChange={(event) => {
+                const nextSelectedEnvFile = event.target.value || null;
+                if (!nextSelectedEnvFile) {
+                  setDraft((current) =>
+                    current
+                      ? {
+                          ...current,
+                          selectedEnvFile: null,
+                          port: null,
+                          readinessValue: current.readinessMode === "port" ? null : current.readinessValue,
+                        }
+                      : current,
+                  );
+                  return;
+                }
+
+                const nextDraft = { ...draft, selectedEnvFile: nextSelectedEnvFile };
+                setDraft(nextDraft);
+                void refreshMetadata(nextDraft, {
+                  preferredEnvFile: nextSelectedEnvFile,
+                  selectedEnvFile: nextSelectedEnvFile,
+                  preferDetectedPort: true,
+                });
+              }}
+            >
+              <option value="">Sin archivo</option>
+              {draft.availableEnvFiles.map((envFile) => (
+                <option key={envFile} value={envFile}>
+                  {envFile}
                 </option>
               ))}
-            </select>
-          </label>
-        ) : (
-          <label className="space-y-1.5">
-            <span className="text-[10px] uppercase tracking-[0.16em] text-textSoft">Run target</span>
-            <input className={fieldClassName} value={draft.runTarget} onChange={(event) => setDraft({ ...draft, runTarget: event.target.value })} />
-          </label>
-        )}
+            </Select>
+          </FieldLabelWrap>
 
-        <label className="space-y-1.5">
-          <span className="text-[10px] uppercase tracking-[0.16em] text-textSoft">Modo</span>
-          <select
-            className={fieldClassName}
-            value={draft.runMode}
-            onChange={(event) => {
-              const nextRunMode = event.target.value as Project["runMode"];
-              setDraft({
-                ...draft,
-                runMode: nextRunMode,
-                runTarget:
-                  nextRunMode === "script"
-                    ? draft.runTarget || draft.availableScripts[0] || "start:dev"
-                    : draft.runTarget,
-              });
-            }}
-          >
-            <option value="script">Script</option>
-            <option value="command">Comando</option>
-          </select>
-        </label>
-        <label className="space-y-1.5">
-          <span className="text-[10px] uppercase tracking-[0.16em] text-textSoft">Package manager</span>
-          <select className={fieldClassName} value={draft.packageManager} onChange={(event) => setDraft({ ...draft, packageManager: event.target.value as Project["packageManager"] })}>
-            <option value="npm">npm</option>
-            <option value="pnpm">pnpm</option>
-            <option value="yarn">yarn</option>
-            <option value="cargo">cargo</option>
-            <option value="unknown">unknown</option>
-          </select>
-        </label>
-        <label className="space-y-1.5">
-          <span className="text-[10px] uppercase tracking-[0.16em] text-textSoft">.env</span>
-          <select
-            className={fieldClassName}
-            value={draft.selectedEnvFile ?? ""}
-            onChange={(event) => {
-              const nextSelectedEnvFile = event.target.value || null;
-              if (!nextSelectedEnvFile) {
-                setDraft((current) =>
-                  current
-                    ? {
-                        ...current,
-                        selectedEnvFile: null,
-                        port: null,
-                        readinessValue: current.readinessMode === "port" ? null : current.readinessValue,
-                      }
-                    : current,
-                );
-                return;
-              }
+          <Card tone="muted" className="[grid-column:1/-1] p-4">
+            <div className="grid gap-3 [grid-template-columns:repeat(auto-fit,minmax(150px,1fr))]">
+              <FieldLabelWrap>
+                <FieldLabel>Puerto</FieldLabel>
+                <Input
+                  type="number"
+                  value={draft.port ?? ""}
+                  onChange={(event) => {
+                    const nextPort = event.target.value ? Number(event.target.value) : null;
+                    setDraft({
+                      ...draft,
+                      port: nextPort,
+                      readinessValue:
+                        draft.readinessMode === "port"
+                          ? nextPort != null
+                            ? String(nextPort)
+                            : null
+                          : draft.readinessValue,
+                    });
+                  }}
+                />
+              </FieldLabelWrap>
 
-              const nextDraft = { ...draft, selectedEnvFile: nextSelectedEnvFile };
-              setDraft(nextDraft);
-              void refreshMetadata(nextDraft, {
-                preferredEnvFile: nextSelectedEnvFile,
-                selectedEnvFile: nextSelectedEnvFile,
-                preferDetectedPort: true,
-              });
-            }}
-          >
-            <option value="">Sin archivo</option>
-            {draft.availableEnvFiles.map((envFile) => <option key={envFile} value={envFile}>{envFile}</option>)}
-          </select>
-        </label>
-        <div className="surface-panel-soft grid gap-2 px-3 py-2.5 [grid-column:1/-1] [grid-template-columns:repeat(auto-fit,minmax(150px,1fr))]">
-          <label className="grid items-center gap-2 [grid-template-columns:auto_minmax(0,1fr)]">
-            <span className="text-[10px] uppercase tracking-[0.16em] text-textSoft whitespace-nowrap">Puerto</span>
-            <input
-              type="number"
-              className={compactFieldClassName}
-              value={draft.port ?? ""}
-              onChange={(event) => {
-                const nextPort = event.target.value ? Number(event.target.value) : null;
-                setDraft({
-                  ...draft,
-                  port: nextPort,
-                  readinessValue:
-                    draft.readinessMode === "port"
-                      ? nextPort != null
-                        ? String(nextPort)
-                        : null
-                      : draft.readinessValue,
-                });
-              }}
-            />
-          </label>
-          <label className="grid items-center gap-2 [grid-template-columns:auto_minmax(0,1fr)]">
-            <span className="text-[10px] uppercase tracking-[0.16em] text-textSoft whitespace-nowrap">Fase</span>
-            <input type="number" className={compactFieldClassName} value={draft.startupPhase} onChange={(event) => setDraft({ ...draft, startupPhase: Number(event.target.value || 1) })} />
-          </label>
-          <label className="grid items-center gap-2 [grid-template-columns:auto_minmax(0,1fr)]">
-            <span className="text-[10px] uppercase tracking-[0.16em] text-textSoft whitespace-nowrap">Orden</span>
-            <input type="number" className={compactFieldClassName} value={draft.catalogOrder} disabled />
-          </label>
-          <label className="grid items-center gap-2 [grid-template-columns:auto_minmax(0,1fr)]">
-            <span className="text-[10px] uppercase tracking-[0.16em] text-textSoft whitespace-nowrap">Ready</span>
-            <select
-              className={compactFieldClassName}
-              value={draft.readinessMode}
-              onChange={(event) => {
-                const readinessMode = event.target.value as Project["readinessMode"];
-                setDraft({
-                  ...draft,
-                  readinessMode,
-                  readinessValue:
-                    readinessMode === "port"
-                      ? draft.port != null
-                        ? String(draft.port)
-                        : draft.readinessValue
-                      : draft.readinessValue,
-                });
-              }}
-            >
-              <option value="none">none</option>
-              <option value="delay">delay</option>
-              <option value="port">port</option>
-            </select>
-          </label>
-        </div>
-        <div className="grid gap-2.5 [grid-column:1/-1] [grid-template-columns:repeat(auto-fit,minmax(160px,1fr))]">
-          <label className="space-y-1.5">
-            <span className="text-[10px] uppercase tracking-[0.16em] text-textSoft">Arranque</span>
-            <select
-              className={fieldClassName}
-              value={draft.launchMode}
-              onChange={(event) => setDraft({ ...draft, launchMode: event.target.value as Project["launchMode"] })}
-            >
-              <option value="service">service</option>
-              <option value="record">record</option>
-              <option value="mock">mock</option>
-            </select>
-          </label>
-          <label className="space-y-1.5">
-            <span className="text-[10px] uppercase tracking-[0.16em] text-textSoft">Mock match</span>
-            <select
-              className={fieldClassName}
-              value={draft.mockMatchMode}
-              onChange={(event) => setDraft({ ...draft, mockMatchMode: event.target.value as Project["mockMatchMode"] })}
-            >
-              <option value="auto">auto</option>
-              <option value="strict">strict</option>
-              <option value="path">path</option>
-            </select>
-          </label>
-          <label className="space-y-1.5">
-            <span className="text-[10px] uppercase tracking-[0.16em] text-textSoft">Miss status</span>
-            <input
-              type="number"
-              className={fieldClassName}
-              value={draft.mockUnmatchedStatus}
-              onChange={(event) => setDraft({ ...draft, mockUnmatchedStatus: Number(event.target.value || 404) })}
-            />
-          </label>
-        </div>
-        <div className="surface-panel-soft px-3 py-2 text-[12px] text-textMuted [grid-column:1/-1]">
-          {draft.launchMode === "service"
-            ? "service: arranca el microservicio tal cual esta configurado."
-            : draft.launchMode === "record"
-              ? "record: publica un proxy grabador en el puerto del servicio, mueve el proceso real a un puerto interno y guarda request/response para futuros mocks."
-              : "mock: levanta un mock HTTP liviano desde las capturas guardadas en el puerto configurado."}
-        </div>
-        <div className="space-y-2 [grid-column:1/-1]">
-          <span className="text-[10px] uppercase tracking-[0.16em] text-textSoft">Proceso</span>
-          <div className="surface-panel-soft grid gap-1.5 px-3 py-2 text-[12px] text-textStrong [grid-template-columns:repeat(auto-fit,minmax(140px,1fr))]">
-            <div>
-              <p className="text-[10px] uppercase tracking-[0.14em] text-textSoft">PID</p>
-              <p>{resourceUsage?.trackedPid ?? "n/a"}</p>
+              <FieldLabelWrap>
+                <FieldLabel>Fase</FieldLabel>
+                <Input
+                  type="number"
+                  value={draft.startupPhase}
+                  onChange={(event) => setDraft({ ...draft, startupPhase: Number(event.target.value || 1) })}
+                />
+              </FieldLabelWrap>
+
+              <FieldLabelWrap>
+                <FieldLabel>Orden</FieldLabel>
+                <Input type="number" value={draft.catalogOrder} disabled />
+              </FieldLabelWrap>
+
+              <FieldLabelWrap>
+                <FieldLabel>Ready</FieldLabel>
+                <Select
+                  value={draft.readinessMode}
+                  onChange={(event) => {
+                    const readinessMode = event.target.value as Project["readinessMode"];
+                    setDraft({
+                      ...draft,
+                      readinessMode,
+                      readinessValue:
+                        readinessMode === "port"
+                          ? draft.port != null
+                            ? String(draft.port)
+                            : draft.readinessValue
+                          : draft.readinessValue,
+                    });
+                  }}
+                >
+                  <option value="none">none</option>
+                  <option value="delay">delay</option>
+                  <option value="port">port</option>
+                </Select>
+              </FieldLabelWrap>
             </div>
-            <div>
-              <p className="text-[10px] uppercase tracking-[0.14em] text-textSoft">Subprocesos</p>
-              <p>{resourceUsage ? `${resourceUsage.totalProcesses} total / ${resourceUsage.totalNodeProcesses} node` : "Sin proceso"}</p>
-            </div>
-            <div>
-              <p className="text-[10px] uppercase tracking-[0.14em] text-textSoft">RAM</p>
-              <p>{resourceUsage ? `${resourceUsage.totalWorkingSetMb.toFixed(1)} MB` : "n/a"}</p>
-            </div>
-            <div className="min-w-0 [grid-column:1/-1]">
-              <p className="text-[10px] uppercase tracking-[0.14em] text-textSoft">Comando activo</p>
-              <p className="truncate text-textMuted" title={resourceUsage?.commandPreview ?? "Sin proceso"}>
-                {resourceUsage?.commandPreview ?? "Sin proceso rastreado por el orchestrator"}
-              </p>
-            </div>
+          </Card>
+
+          <div className="grid gap-3 [grid-column:1/-1] [grid-template-columns:repeat(auto-fit,minmax(180px,1fr))]">
+            <FieldLabelWrap>
+              <FieldLabel>Arranque</FieldLabel>
+              <Select
+                value={draft.launchMode}
+                onChange={(event) => setDraft({ ...draft, launchMode: event.target.value as Project["launchMode"] })}
+              >
+                <option value="service">service</option>
+                <option value="record">record</option>
+                <option value="mock">mock</option>
+              </Select>
+            </FieldLabelWrap>
+
+            <FieldLabelWrap>
+              <FieldLabel>Mock match</FieldLabel>
+              <Select
+                value={draft.mockMatchMode}
+                onChange={(event) => setDraft({ ...draft, mockMatchMode: event.target.value as Project["mockMatchMode"] })}
+              >
+                <option value="auto">auto</option>
+                <option value="strict">strict</option>
+                <option value="path">path</option>
+              </Select>
+            </FieldLabelWrap>
+
+            <FieldLabelWrap>
+              <FieldLabel>Miss status</FieldLabel>
+              <Input
+                type="number"
+                value={draft.mockUnmatchedStatus}
+                onChange={(event) => setDraft({ ...draft, mockUnmatchedStatus: Number(event.target.value || 404) })}
+              />
+            </FieldLabelWrap>
           </div>
+
+          <Card tone="accent" className="[grid-column:1/-1] p-4 text-[12px] text-textMuted">
+            {draft.launchMode === "service"
+              ? "service: arranca el microservicio tal cual está configurado."
+              : draft.launchMode === "record"
+                ? "record: publica un proxy grabador en el puerto del servicio, mueve el proceso real a un puerto interno y guarda request/response para futuros mocks."
+                : "mock: levanta un mock HTTP liviano desde las capturas guardadas en el puerto configurado."}
+          </Card>
+
+          <Card tone="muted" className="[grid-column:1/-1] p-4">
+            <FieldGroup>
+              <FieldLabel>Proceso</FieldLabel>
+              <div className="grid gap-2 [grid-template-columns:repeat(auto-fit,minmax(160px,1fr))]">
+                <div>
+                  <p className="text-[10px] uppercase tracking-[0.14em] text-textSoft">PID</p>
+                  <p className="mt-1 text-[12px] text-textStrong">{resourceUsage?.trackedPid ?? "n/a"}</p>
+                </div>
+                <div>
+                  <p className="text-[10px] uppercase tracking-[0.14em] text-textSoft">Subprocesos</p>
+                  <p className="mt-1 text-[12px] text-textStrong">
+                    {resourceUsage ? `${resourceUsage.totalProcesses} total / ${resourceUsage.totalNodeProcesses} node` : "Sin proceso"}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-[10px] uppercase tracking-[0.14em] text-textSoft">RAM</p>
+                  <p className="mt-1 text-[12px] text-textStrong">
+                    {resourceUsage ? `${resourceUsage.totalWorkingSetMb.toFixed(1)} MB` : "n/a"}
+                  </p>
+                </div>
+                <div className="[grid-column:1/-1] min-w-0">
+                  <p className="text-[10px] uppercase tracking-[0.14em] text-textSoft">Comando activo</p>
+                  <p className="mt-1 truncate text-[12px] text-textMuted" title={resourceUsage?.commandPreview ?? "Sin proceso"}>
+                    {resourceUsage?.commandPreview ?? "Sin proceso rastreado por el orchestrator"}
+                  </p>
+                </div>
+              </div>
+            </FieldGroup>
+          </Card>
+
+          <FieldLabelWrap className="[grid-column:1/-1]">
+            <FieldLabel>Overrides</FieldLabel>
+            <Textarea rows={6} value={overridesText} onChange={(event) => setOverridesText(event.target.value)} />
+            <FieldHint>Usa formato `KEY=value` por línea. Se guardan como overrides activos del proyecto.</FieldHint>
+          </FieldLabelWrap>
+
+          <Card tone="muted" className="[grid-column:1/-1] p-4">
+            <FieldGroup>
+              <FieldLabel>Dependencias</FieldLabel>
+              <div className="grid gap-2 [grid-template-columns:repeat(auto-fit,minmax(180px,1fr))]">
+                {otherProjects.length ? (
+                  otherProjects.map((entry) => {
+                    const checked = draft.dependencies.some((dependency) => dependency.dependsOnProjectId === entry.id);
+                    return (
+                      <label key={entry.id} className="ui-inline-option ui-inline-option--block">
+                        <span className="min-w-0 flex-1">
+                          <span className="block truncate text-[13px] font-medium text-textStrong">{entry.name}</span>
+                          <span className="block truncate text-[11px] text-textMuted">{entry.rootPath}</span>
+                        </span>
+                        <Checkbox
+                          checked={checked}
+                          onChange={(event) => {
+                            const dependencies = event.currentTarget.checked
+                              ? [...draft.dependencies, { id: `${draft.id}-dep-${entry.id}`, dependsOnProjectId: entry.id, requiredForStart: true }]
+                              : draft.dependencies.filter((dependency) => dependency.dependsOnProjectId !== entry.id);
+                            setDraft({ ...draft, dependencies });
+                          }}
+                        />
+                      </label>
+                    );
+                  })
+                ) : (
+                  <EmptyState
+                    title="Sin dependencias disponibles"
+                    description="No hay otros proyectos en el catálogo para enlazar como dependencias de arranque."
+                  />
+                )}
+              </div>
+            </FieldGroup>
+          </Card>
+
+          <Card tone="muted" className="[grid-column:1/-1] p-4">
+            <FieldGroup>
+              <FieldLabel>Workspaces</FieldLabel>
+              {editablePresets.length ? (
+                <div className="grid gap-2 [grid-template-columns:repeat(auto-fit,minmax(180px,1fr))]">
+                  {editablePresets.map((preset) => {
+                    const checked = preset.projectIds.includes(draft.id);
+                    return (
+                      <label key={preset.id} className="ui-inline-option ui-inline-option--block">
+                        <span className="min-w-0 flex-1">
+                          <span className="block truncate text-[13px] font-medium text-textStrong">{preset.name}</span>
+                          {preset.description ? <span className="block truncate text-[11px] text-textMuted">{preset.description}</span> : null}
+                        </span>
+                        <Checkbox
+                          checked={checked}
+                          onChange={(event) => onToggleProjectPreset(preset.id, draft.id, event.currentTarget.checked)}
+                        />
+                      </label>
+                    );
+                  })}
+                </div>
+              ) : (
+                <EmptyState
+                  title="Todavía no hay workspaces"
+                  description="Crea un workspace para agrupar y ejecutar microservicios por pestañas."
+                />
+              )}
+            </FieldGroup>
+          </Card>
+
+          <Card tone="muted" className="[grid-column:1/-1] p-4">
+            <FieldRow>
+              <Checkbox checked={draft.enabled} onChange={(event) => setDraft({ ...draft, enabled: event.currentTarget.checked })} />
+              <div>
+                <p className="text-[13px] font-medium text-textStrong">Habilitado para acciones globales</p>
+                <p className="text-[11px] text-textMuted">Participa en arranques, stops y perfiles rápidos del catálogo.</p>
+              </div>
+            </FieldRow>
+          </Card>
+
+          <Card tone="muted" className="[grid-column:1/-1] p-4">
+            <FieldRow>
+              <Checkbox
+                checked={draft.waitForPreviousReady}
+                onChange={(event) => setDraft({ ...draft, waitForPreviousReady: event.currentTarget.checked })}
+              />
+              <div>
+                <p className="text-[13px] font-medium text-textStrong">Esperar ready del anterior</p>
+                <p className="text-[11px] text-textMuted">Aplica a arranques por lote para controlar la secuencia de dependencias.</p>
+              </div>
+            </FieldRow>
+          </Card>
         </div>
-        <label className="space-y-1.5 [grid-column:1/-1]">
-          <span className="text-[10px] uppercase tracking-[0.16em] text-textSoft">Overrides</span>
-          <textarea rows={5} className="surface-chip w-full px-3 py-2 text-[13px] text-textStrong" value={overridesText} onChange={(event) => setOverridesText(event.target.value)} />
-        </label>
-        <div className="space-y-2 [grid-column:1/-1]">
-          <span className="text-[10px] uppercase tracking-[0.16em] text-textSoft">Dependencias</span>
-          <div className="grid gap-1.5 [grid-template-columns:repeat(auto-fit,minmax(180px,1fr))]">
-            {otherProjects.map((entry) => {
-              const checked = draft.dependencies.some((dependency) => dependency.dependsOnProjectId === entry.id);
-              return (
-                <label key={entry.id} className="surface-panel-soft flex items-center justify-between gap-3 px-3 py-2 text-[13px] text-textStrong">
-                  <span className="truncate">{entry.name}</span>
-                  <input type="checkbox" checked={checked} onChange={(event) => {
-                    const dependencies = event.target.checked
-                      ? [...draft.dependencies, { id: `${draft.id}-dep-${entry.id}`, dependsOnProjectId: entry.id, requiredForStart: true }]
-                      : draft.dependencies.filter((dependency) => dependency.dependsOnProjectId !== entry.id);
-                    setDraft({ ...draft, dependencies });
-                  }} />
-                </label>
-              );
-            })}
-          </div>
-        </div>
-        <div className="space-y-2 [grid-column:1/-1]">
-          <span className="text-[10px] uppercase tracking-[0.16em] text-textSoft">Workspaces</span>
-          {editablePresets.length ? (
-            <div className="grid gap-1.5 [grid-template-columns:repeat(auto-fit,minmax(180px,1fr))]">
-              {editablePresets.map((preset) => {
-                const checked = preset.projectIds.includes(draft.id);
-                return (
-                  <label key={preset.id} className="surface-panel-soft flex items-center justify-between gap-3 px-3 py-2 text-[13px] text-textStrong">
-                    <span className="min-w-0">
-                      <span className="block truncate">{preset.name}</span>
-                      {preset.description ? <span className="block truncate text-[11px] text-textMuted">{preset.description}</span> : null}
-                    </span>
-                    <input
-                      type="checkbox"
-                      checked={checked}
-                      onChange={(event) => onToggleProjectPreset(preset.id, draft.id, event.target.checked)}
-                    />
-                  </label>
-                );
-              })}
-            </div>
-          ) : (
-            <div className="surface-panel-soft px-3 py-2 text-[12px] text-textMuted">
-              Crea un workspace para agrupar y ejecutar microservicios por pestanas.
-            </div>
-          )}
-        </div>
-        <label className="surface-panel-soft flex items-center gap-2.5 px-3 py-2 text-[13px] text-textStrong [grid-column:1/-1]">
-          <input type="checkbox" checked={draft.enabled} onChange={(event) => setDraft({ ...draft, enabled: event.target.checked })} />
-          Habilitado para acciones globales
-        </label>
-        <label className="surface-panel-soft flex items-center gap-2.5 px-3 py-2 text-[13px] text-textStrong [grid-column:1/-1]">
-          <input
-            type="checkbox"
-            checked={draft.waitForPreviousReady}
-            onChange={(event) => setDraft({ ...draft, waitForPreviousReady: event.target.checked })}
-          />
-          Esperar a que el servicio anterior quede ready en arranques por lote
-        </label>
-      </div></div>
-      ) : (
-        <div className="min-h-0 flex-1 overflow-hidden p-4">
-          <ProjectMocksEditor project={draft} />
-        </div>
-      )}
+      </TabsContent>
+
+      <TabsContent value="mocks" className="min-h-0 flex-1 overflow-hidden p-4">
+        <ProjectMocksEditor project={draft} />
+      </TabsContent>
 
       <div className="surface-divider-top flex flex-wrap items-center justify-between gap-2 px-4 py-3">
-        <p className={["text-[11px]", saveState === "error" ? "text-danger" : "text-textSoft"].join(" ")}>Ultimo exit code: {draft.lastExitCode ?? "n/a"} | {saveHint}</p>
+        <p className={["text-[11px]", saveState === "error" ? "text-danger" : "text-textSoft"].join(" ")}>
+          Último exit code: {draft.lastExitCode ?? "n/a"} | {saveHint}
+        </p>
         <div className="flex flex-wrap gap-1.5">
-          <button className="inline-flex items-center gap-1.5 border border-danger/40 bg-danger/12 px-3 py-2 text-xs font-semibold text-danger" onClick={() => void onDelete(draft.id)}><Trash2 className="h-3.5 w-3.5" /> Eliminar</button>
-          <button className="inline-flex items-center gap-1.5 border border-accent/40 bg-accent/10 px-3 py-2 text-xs font-semibold text-accent" onClick={() => void handleSave()}><Save className="h-3.5 w-3.5" /> Guardar</button>
+          <Button type="button" variant="destructive" size="sm" onClick={() => void onDelete(draft.id)}>
+            <Trash2 className="h-3.5 w-3.5" />
+            Eliminar
+          </Button>
+          <Button type="button" variant="default" size="sm" onClick={() => void handleSave()}>
+            <Save className="h-3.5 w-3.5" />
+            Guardar
+          </Button>
         </div>
       </div>
-    </div>
+    </Tabs>
   );
 }
-

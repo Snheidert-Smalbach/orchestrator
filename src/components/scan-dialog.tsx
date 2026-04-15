@@ -1,7 +1,13 @@
-import * as Dialog from "@radix-ui/react-dialog";
-import { FolderPlus, FolderSearch, LoaderCircle, ScanSearch, X } from "lucide-react";
+import { FolderPlus, FolderSearch, LoaderCircle, ScanSearch } from "lucide-react";
 import { useEffect, useState } from "react";
 import type { DetectedProject } from "../lib/types";
+import { Button } from "./ui/button";
+import { Card } from "./ui/card";
+import { Checkbox } from "./ui/checkbox";
+import { DialogShell } from "./ui/dialog-shell";
+import { EmptyState } from "./ui/empty-state";
+import { FieldHint, FieldLabel, FieldLabelWrap } from "./ui/field";
+import { Input } from "./ui/input";
 
 type Props = {
   open: boolean;
@@ -15,7 +21,17 @@ type Props = {
   onImportSingle: (rootPath: string) => Promise<void>;
 };
 
-export function ScanDialog({ open, busy, defaultRoot, detectedProjects, onOpenChange, onPickRoot, onScan, onImport, onImportSingle }: Props) {
+export function ScanDialog({
+  open,
+  busy,
+  defaultRoot,
+  detectedProjects,
+  onOpenChange,
+  onPickRoot,
+  onScan,
+  onImport,
+  onImportSingle,
+}: Props) {
   const [rootPath, setRootPath] = useState(defaultRoot);
   const [recursive, setRecursive] = useState(false);
   const [selectedPaths, setSelectedPaths] = useState<string[]>([]);
@@ -29,75 +45,157 @@ export function ScanDialog({ open, busy, defaultRoot, detectedProjects, onOpenCh
   }, [detectedProjects]);
 
   return (
-    <Dialog.Root open={open} onOpenChange={onOpenChange}>
-      <Dialog.Portal>
-        <Dialog.Overlay className="fixed inset-0 bg-ink/62 backdrop-blur-sm" />
-        <Dialog.Content className="surface-panel fixed left-1/2 top-1/2 max-h-[85vh] w-[min(980px,92vw)] -translate-x-1/2 -translate-y-1/2 overflow-hidden">
-          <div className="surface-divider flex items-center justify-between px-6 py-5">
-            <div>
-              <Dialog.Title className="text-xl font-semibold text-textStrong">Escanear proyectos locales</Dialog.Title>
-              <Dialog.Description className="mt-1 text-sm text-textMuted">Detecta la carpeta seleccionada si ya es un proyecto y tambien sus subcarpetas inmediatas para importarlas al catalogo.</Dialog.Description>
-            </div>
-            <Dialog.Close className="surface-chip p-2 text-textStrong transition hover:bg-panelSoft"><X className="h-4 w-4" /></Dialog.Close>
-          </div>
+    <DialogShell
+      open={open}
+      onOpenChange={onOpenChange}
+      title="Escanear proyectos locales"
+      description="Detecta la carpeta seleccionada y también sus subcarpetas inmediatas para importarlas al catálogo."
+      widthClassName="w-[min(980px,92vw)]"
+      bodyClassName="max-h-[84vh] overflow-auto"
+    >
+      <div className="grid gap-4 md:grid-cols-[1fr_auto_auto_auto]">
+        <FieldLabelWrap>
+          <FieldLabel>Root</FieldLabel>
+          <Input value={rootPath} onChange={(event) => setRootPath(event.target.value)} />
+          <FieldHint>Usa una carpeta base para detectar servicios y preparar una importación en lote.</FieldHint>
+        </FieldLabelWrap>
 
-          <div className="surface-divider grid gap-4 px-6 py-5 md:grid-cols-[1fr_auto_auto_auto]">
-            <label className="space-y-2">
-              <span className="text-xs uppercase tracking-[0.18em] text-textSoft">Root</span>
-              <input className="surface-chip w-full px-4 py-3 text-textStrong" value={rootPath} onChange={(event) => setRootPath(event.target.value)} />
-            </label>
-            <button className="surface-chip mt-auto inline-flex items-center gap-2 px-4 py-3 text-sm font-semibold text-textStrong" onClick={async () => { const picked = await onPickRoot(rootPath); if (picked) setRootPath(picked); }}><FolderSearch className="h-4 w-4" /> Elegir</button>
-            <label className="surface-chip mt-auto inline-flex items-center gap-2 px-4 py-3 text-sm text-textStrong"><input type="checkbox" checked={recursive} onChange={(event) => setRecursive(event.target.checked)} /> Recursivo</label>
-            <button
-              className="surface-chip mt-auto inline-flex items-center justify-center gap-2 px-4 py-3 text-sm font-semibold text-textStrong"
-              onClick={async () => {
-                const picked = await onPickRoot(rootPath);
-                if (picked) {
-                  setRootPath(picked);
-                  await onImportSingle(picked);
-                }
-              }}
-            >
-              <FolderPlus className="h-4 w-4" />
-              Agregar uno
-            </button>
-            <button className="mt-auto inline-flex items-center justify-center gap-2 border border-accent/40 bg-accent/10 px-4 py-3 text-sm font-semibold text-accent" onClick={() => void onScan(rootPath, recursive)}>{busy ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <ScanSearch className="h-4 w-4" />} Escanear</button>
-          </div>
+        <Button
+          type="button"
+          variant="secondary"
+          size="lg"
+          className="mt-auto"
+          onClick={async () => {
+            const picked = await onPickRoot(rootPath);
+            if (picked) {
+              setRootPath(picked);
+            }
+          }}
+        >
+          <FolderSearch className="h-4 w-4" />
+          Elegir
+        </Button>
 
-          <div className="max-h-[420px] overflow-auto scrollbar-thin">
-            <table className="min-w-full border-collapse text-sm">
-              <thead className="sticky top-0 bg-panel">
-                <tr className="border-b border-line text-left text-xs uppercase tracking-[0.18em] text-textSoft">
-                  <th className="px-5 py-3">Importar</th>
-                  <th className="px-5 py-3">Proyecto</th>
-                  <th className="px-5 py-3">Comando sugerido</th>
-                  <th className="px-5 py-3">Puerto</th>
-                  <th className="px-5 py-3">Estado</th>
-                </tr>
-              </thead>
-              <tbody>
-                {detectedProjects.map((project) => {
-                  const checked = selectedPaths.includes(project.rootPath);
-                  return (
-                    <tr key={project.rootPath} className="border-b border-line/70">
-                      <td className="px-5 py-4"><input type="checkbox" checked={checked} disabled={project.alreadyImported} onChange={(event) => setSelectedPaths((current) => event.target.checked ? [...current, project.rootPath] : current.filter((entry) => entry !== project.rootPath))} /></td>
-                      <td className="px-5 py-4"><p className="font-semibold text-textStrong">{project.name}</p><p className="mt-1 text-xs text-textMuted">{project.rootPath}</p></td>
-                      <td className="px-5 py-4 text-textStrong">{project.suggestedRunMode === "script" ? "script" : "command"} / {project.suggestedRunTarget}</td>
-                      <td className="px-5 py-4 text-textStrong">{project.suggestedPort ?? "n/a"}</td>
-                      <td className="px-5 py-4 text-textMuted">{project.alreadyImported ? "Ya importado" : "Nuevo"}</td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
+        <label className="ui-inline-option mt-auto">
+          <Checkbox checked={recursive} onChange={(event) => setRecursive(event.currentTarget.checked)} />
+          <span>
+            <span className="block text-[11px] font-semibold text-textStrong">Recursivo</span>
+            <span className="block text-[10px] text-textMuted">Explora más profundidad del root.</span>
+          </span>
+        </label>
 
-          <div className="surface-divider-top flex flex-wrap items-center justify-between gap-3 px-6 py-5">
-            <p className="text-sm text-textMuted">{detectedProjects.length ? `${selectedPaths.length} de ${detectedProjects.length} seleccionados` : "Aun no hay proyectos detectados."}</p>
-            <button className="inline-flex items-center gap-2 border border-accent/40 bg-accent/10 px-4 py-3 text-sm font-semibold text-accent" onClick={() => void onImport(rootPath, recursive, selectedPaths)} disabled={!detectedProjects.length}><FolderSearch className="h-4 w-4" /> Importar seleccionados</button>
+        <Button
+          type="button"
+          variant="default"
+          size="lg"
+          className="mt-auto"
+          onClick={async () => {
+            const picked = await onPickRoot(rootPath);
+            if (picked) {
+              setRootPath(picked);
+              await onImportSingle(picked);
+            }
+          }}
+        >
+          <FolderPlus className="h-4 w-4" />
+          Agregar uno
+        </Button>
+      </div>
+
+      <div className="mt-4 flex flex-wrap items-center justify-between gap-2">
+        <p className="text-[11px] text-textMuted">
+          {detectedProjects.length
+            ? `${selectedPaths.length} de ${detectedProjects.length} candidatos listos para importar.`
+            : "Aún no hay proyectos detectados."}
+        </p>
+        <div className="flex flex-wrap gap-2">
+          <Button type="button" variant="secondary" size="sm" onClick={() => void onScan(rootPath, recursive)} busy={busy}>
+            {busy ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <ScanSearch className="h-4 w-4" />}
+            Escanear
+          </Button>
+          <Button
+            type="button"
+            variant="success"
+            size="sm"
+            onClick={() => void onImport(rootPath, recursive, selectedPaths)}
+            disabled={!detectedProjects.length}
+          >
+            <FolderSearch className="h-4 w-4" />
+            Importar seleccionados
+          </Button>
+        </div>
+      </div>
+
+      <div className="mt-4 max-h-[420px] overflow-auto scrollbar-thin pr-1">
+        {detectedProjects.length ? (
+          <div className="grid gap-2">
+            {detectedProjects.map((project) => {
+              const checked = selectedPaths.includes(project.rootPath);
+              return (
+                <Card key={project.rootPath} tone={project.alreadyImported ? "muted" : "default"} className="p-4">
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div className="min-w-0 flex-1">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <p className="text-[13px] font-semibold text-textStrong">{project.name}</p>
+                        <span className="ui-badge ui-badge--secondary">
+                          {project.suggestedRunMode === "script" ? "script" : "command"}
+                        </span>
+                        <span className="ui-badge ui-badge--info">{project.packageManager}</span>
+                        <span className="ui-badge ui-badge--secondary">
+                          {project.alreadyImported ? "ya importado" : "nuevo"}
+                        </span>
+                      </div>
+                      <p className="mt-1 text-[11px] text-textMuted">{project.rootPath}</p>
+                      <div className="mt-3 grid gap-2 md:grid-cols-3">
+                        <div>
+                          <p className="text-[9px] uppercase tracking-[0.14em] text-textSoft">Comando sugerido</p>
+                          <p className="mt-1 text-[11px] text-textStrong">
+                            {project.suggestedRunMode === "script" ? "script" : "command"} / {project.suggestedRunTarget}
+                          </p>
+                        </div>
+                        <div>
+                          <p className="text-[9px] uppercase tracking-[0.14em] text-textSoft">Puerto</p>
+                          <p className="mt-1 text-[11px] text-textStrong">{project.suggestedPort ?? "n/a"}</p>
+                        </div>
+                        <div>
+                          <p className="text-[9px] uppercase tracking-[0.14em] text-textSoft">Estado</p>
+                          <p className="mt-1 text-[11px] text-textStrong">{project.alreadyImported ? "Importado" : "Disponible"}</p>
+                        </div>
+                      </div>
+                    </div>
+
+                    <label className="ui-inline-option">
+                      <Checkbox
+                        checked={checked}
+                        disabled={project.alreadyImported}
+                        onChange={(event) =>
+                          setSelectedPaths((current) =>
+                            event.currentTarget.checked
+                              ? [...current, project.rootPath]
+                              : current.filter((entry) => entry !== project.rootPath),
+                          )
+                        }
+                      />
+                      <span>
+                        <span className="block text-[11px] font-semibold text-textStrong">Importar</span>
+                        <span className="block text-[10px] text-textMuted">
+                          {project.alreadyImported ? "Ya está en el catálogo" : "Se incluirá en la importación"}
+                        </span>
+                      </span>
+                    </label>
+                  </div>
+                </Card>
+              );
+            })}
           </div>
-        </Dialog.Content>
-      </Dialog.Portal>
-    </Dialog.Root>
+        ) : (
+          <EmptyState
+            icon={<ScanSearch className="h-4 w-4" />}
+            title="Todavía no hay resultados"
+            description="Lanza un escaneo para ver proyectos detectados e importarlos al catálogo."
+          />
+        )}
+      </div>
+    </DialogShell>
   );
 }
