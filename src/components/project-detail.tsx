@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { Play, RefreshCw, Rocket, Save, Square, Trash2, TriangleAlert } from "lucide-react";
 import { inspectProject } from "../lib/tauri";
 import type { DetectedProject, Preset, Project, ProjectEnvOverride, ProjectResourceUsage } from "../lib/types";
+import { ProjectMocksEditor } from "./project-mocks-editor";
 import { StatusPill } from "./status-pill";
 
 type SaveOptions = {
@@ -71,7 +72,7 @@ function buildProjectPayload(project: Project, overridesText: string) {
 
 function serializeProjectConfig(project: Project, overridesText: string) {
   const payload = buildProjectPayload(project, overridesText);
-  const { status: _status, lastExitCode: _lastExitCode, ...config } = payload;
+  const { status: _status, lastExitCode: _lastExitCode, mockSummary: _mockSummary, ...config } = payload;
   return JSON.stringify(config);
 }
 
@@ -583,6 +584,7 @@ export function ProjectDetail({
               ? "record: publica un proxy grabador en el puerto del servicio, mueve el proceso real a un puerto interno y guarda request/response para futuros mocks."
               : "mock: levanta un mock HTTP liviano desde las capturas guardadas en el puerto configurado."}
         </div>
+        <ProjectMocksEditor project={draft} />
         <div className="space-y-2 [grid-column:1/-1]">
           <span className="text-[10px] uppercase tracking-[0.16em] text-textSoft">Proceso</span>
           <div className="surface-panel-soft grid gap-1.5 px-3 py-2 text-[12px] text-textStrong [grid-template-columns:repeat(auto-fit,minmax(140px,1fr))]">

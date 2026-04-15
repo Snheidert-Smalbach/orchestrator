@@ -1,7 +1,10 @@
 use tauri::{AppHandle, State};
 
-use crate::models::{Preset, Project, ProjectOrderUpdate, Snapshot, SystemDiagnostics};
-use crate::{db, diagnostics, runtime, scanner, AppState};
+use crate::models::{
+    Preset, Project, ProjectMock, ProjectMockCollection, ProjectOrderUpdate, Snapshot,
+    SystemDiagnostics,
+};
+use crate::{db, diagnostics, mock_catalog, runtime, scanner, AppState};
 
 fn map_error<T>(result: anyhow::Result<T>) -> Result<T, String> {
     result.map_err(|error| error.to_string())
@@ -134,6 +137,40 @@ pub fn reorder_projects(
 pub fn delete_project(project_id: String, state: State<'_, AppState>) -> Result<Snapshot, String> {
     map_error(db::delete_project(&state.db_path, &project_id))?;
     map_error(db::build_snapshot(&state.db_path))
+}
+
+#[tauri::command]
+pub fn get_project_mocks(
+    project_id: String,
+    state: State<'_, AppState>,
+) -> Result<ProjectMockCollection, String> {
+    map_error(mock_catalog::list_project_mocks(&state.db_path, &project_id))
+}
+
+#[tauri::command]
+pub fn save_project_mock(
+    project_id: String,
+    mock: ProjectMock,
+    state: State<'_, AppState>,
+) -> Result<ProjectMockCollection, String> {
+    map_error(mock_catalog::save_project_mock(
+        &state.db_path,
+        &project_id,
+        mock,
+    ))
+}
+
+#[tauri::command]
+pub fn delete_project_mock(
+    project_id: String,
+    mock_id: String,
+    state: State<'_, AppState>,
+) -> Result<ProjectMockCollection, String> {
+    map_error(mock_catalog::delete_project_mock(
+        &state.db_path,
+        &project_id,
+        &mock_id,
+    ))
 }
 
 #[tauri::command]

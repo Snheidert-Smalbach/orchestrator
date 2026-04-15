@@ -19,6 +19,7 @@ import {
 import type {
   DetectedProject,
   LogPayload,
+  ProjectMockSummary,
   Preset,
   Project,
   RuntimeStatusPayload,
@@ -77,6 +78,7 @@ interface AppStore {
   appendLog: (payload: LogPayload) => void;
   appendProjectMessage: (projectIds: string[], message: string, stream?: LogPayload["stream"]) => void;
   applyRuntimeStatus: (payload: RuntimeStatusPayload) => void;
+  patchProjectMockSummary: (projectId: string, summary: ProjectMockSummary) => void;
 }
 
 const defaultSettings: Settings = {
@@ -865,4 +867,15 @@ export const useAppStore = create<AppStore>((set, get) => ({
             : state.error,
       };
     }),
+  patchProjectMockSummary: (projectId, summary) =>
+    set((state) => ({
+      projects: state.projects.map((project) =>
+        project.id === projectId
+          ? {
+              ...project,
+              mockSummary: summary,
+            }
+          : project,
+      ),
+    })),
 }));

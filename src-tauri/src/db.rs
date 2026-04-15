@@ -5,9 +5,10 @@ use rusqlite::{params, Connection, OptionalExtension};
 
 use crate::models::{
     default_root_path, LaunchMode, MockMatchMode, PackageManager, Preset, Project,
-    ProjectDependency, ProjectEnvOverride, ProjectOrderUpdate, ProjectStatus, ReadinessMode,
-    RunMode, RuntimeKind, Settings, Snapshot,
+    ProjectDependency, ProjectEnvOverride, ProjectMockSummary, ProjectOrderUpdate, ProjectStatus,
+    ReadinessMode, RunMode, RuntimeKind, Settings, Snapshot,
 };
+use crate::mock_catalog;
 
 fn open_connection(db_path: &Path) -> Result<Connection> {
     let conn = Connection::open(db_path)?;
@@ -409,6 +410,7 @@ pub fn list_projects(db_path: &Path) -> Result<Vec<Project>> {
             wait_for_previous_ready: row.get::<_, i64>(19)? == 1,
             enabled: row.get::<_, i64>(20)? == 1,
             tags: serde_json::from_str(&tags_json).unwrap_or_default(),
+            mock_summary: ProjectMockSummary::default(),
             env_overrides: Vec::new(),
             dependencies: Vec::new(),
             status: ProjectStatus::from_db(&row.get::<_, String>(22)?),
@@ -421,6 +423,8 @@ pub fn list_projects(db_path: &Path) -> Result<Vec<Project>> {
         let mut project = row?;
         project.env_overrides = load_env_overrides(&conn, &project.id)?;
         project.dependencies = load_dependencies(&conn, &project.id)?;
+        project.mock_summary = mock_catalog::summarize_project_mocks(db_path, &project.id)
+            .unwrap_or_default();
         projects.push(project);
     }
 

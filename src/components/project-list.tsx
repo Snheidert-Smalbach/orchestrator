@@ -1,4 +1,4 @@
-import * as Dialog from "@radix-ui/react-dialog";
+﻿import * as Dialog from "@radix-ui/react-dialog";
 import {
   Boxes,
   ChevronDown,
@@ -337,6 +337,7 @@ export function ProjectList({
               <th className="w-[44px] px-2 py-2">Run</th>
               <th className="px-2 py-2">Servicio</th>
               <th className="w-[58px] px-2 py-2">Port</th>
+              <th className="w-[132px] px-2 py-2">Mocks</th>
               <th className="w-[48px] px-2 py-2">Ord</th>
               <th className="w-[56px] px-2 py-2">Prev</th>
               <th className="w-[88px] px-2 py-2">Estado</th>
@@ -430,6 +431,23 @@ export function ProjectList({
                       </div>
                     </td>
                     <td className="px-2 py-2.5 align-middle text-[11px] leading-4 text-textStrong">{project.port ?? "n/a"}</td>
+                    <td className="px-2 py-2.5 align-middle">
+                      {project.mockSummary.totalCount ? (
+                        <div className="space-y-1">
+                          <p className="text-[11px] font-semibold leading-4 text-textStrong">
+                            {project.mockSummary.totalCount} mock{project.mockSummary.totalCount === 1 ? "" : "s"}
+                          </p>
+                          <p className="text-[9px] leading-4 text-textMuted">
+                            {project.mockSummary.graphqlCount} gql / {project.mockSummary.restCount} rest
+                          </p>
+                          <p className="text-[9px] leading-4 text-textSoft">
+                            {project.mockSummary.manualCount} manual / {project.mockSummary.capturedCount} capt
+                          </p>
+                        </div>
+                      ) : (
+                        <span className="text-[10px] text-textSoft">sin mocks</span>
+                      )}
+                    </td>
                     <td className="px-2 py-2.5 align-middle text-[11px] leading-4 text-textStrong">{project.catalogOrder}</td>
                     <td className="px-2 py-2.5 align-middle">
                       <input
@@ -513,7 +531,7 @@ export function ProjectList({
 
                   {isExpanded ? (
                     <tr className={project.enabled ? "" : "opacity-60"}>
-                      <td colSpan={7} className="px-2 pb-1.5 pt-0.5">
+                      <td colSpan={8} className="px-2 pb-1.5 pt-0.5">
                         <div className="surface-panel-soft grid gap-1.5 px-2 py-1.5 text-[10px] leading-4 text-textMuted md:grid-cols-[minmax(0,1.9fr)_minmax(0,1.15fr)_minmax(0,1fr)]">
                           <div className="min-w-0">
                             <p className="text-[9px] uppercase tracking-[0.14em] text-textSoft">Ruta</p>
@@ -533,7 +551,7 @@ export function ProjectList({
                           </div>
                           <div className="min-w-0">
                             <p className="text-[9px] uppercase tracking-[0.14em] text-textSoft">Arranque</p>
-                            <p className="truncate text-textMuted" title={`Orden ${project.catalogOrder} � fase ${project.startupPhase}`}>
+                            <p className="truncate text-textMuted" title={`Orden ${project.catalogOrder} · fase ${project.startupPhase}`}>
                               #{project.catalogOrder} / fase {project.startupPhase} / {project.launchMode} / {project.waitForPreviousReady ? "espera ready del anterior" : "sin espera"}
                             </p>
                           </div>
@@ -545,6 +563,19 @@ export function ProjectList({
                               </p>
                             ) : (
                               <p className="truncate text-textMuted">Sin proceso rastreado</p>
+                            )}
+                          </div>
+                          <div className="min-w-0">
+                            <p className="text-[9px] uppercase tracking-[0.14em] text-textSoft">Mocks</p>
+                            {project.mockSummary.totalCount ? (
+                              <p
+                                className="truncate text-textMuted"
+                                title={project.mockSummary.routes.join(" | ") || "Mocks cargados"}
+                              >
+                                {project.mockSummary.routes.join(" | ") || `${project.mockSummary.totalCount} mocks disponibles`}
+                              </p>
+                            ) : (
+                              <p className="truncate text-textMuted">Sin capturas o mocks manuales</p>
                             )}
                           </div>
                         </div>
@@ -602,3 +633,4 @@ export function ProjectList({
     </div>
   );
 }
+

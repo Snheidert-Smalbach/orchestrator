@@ -62,6 +62,19 @@ enum_codec!(MockMatchMode {
     Unknown => "unknown"
 });
 
+enum_codec!(MockSource {
+    Captured => "captured",
+    Manual => "manual",
+    Unknown => "unknown"
+});
+
+enum_codec!(MockKind {
+    Rest => "rest",
+    Graphql => "graphql",
+    HttpOther => "http_other",
+    Unknown => "unknown"
+});
+
 enum_codec!(ProjectStatus {
     Idle => "idle",
     Starting => "starting",
@@ -115,6 +128,54 @@ pub struct ProjectDependency {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct MockHeader {
+    pub name: String,
+    pub value: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProjectMock {
+    pub id: String,
+    pub name: String,
+    pub source: MockSource,
+    pub kind: MockKind,
+    pub recorded_at: String,
+    pub notes: Option<String>,
+    pub request_method: String,
+    pub request_path: String,
+    pub request_query: String,
+    pub request_headers: Vec<MockHeader>,
+    pub request_content_type: Option<String>,
+    pub request_body: String,
+    pub response_status_code: u16,
+    pub response_reason_phrase: String,
+    pub response_headers: Vec<MockHeader>,
+    pub response_content_type: Option<String>,
+    pub response_body: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct ProjectMockSummary {
+    pub total_count: usize,
+    pub graphql_count: usize,
+    pub rest_count: usize,
+    pub manual_count: usize,
+    pub captured_count: usize,
+    pub last_updated_at: Option<String>,
+    pub routes: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct ProjectMockCollection {
+    pub summary: ProjectMockSummary,
+    pub mocks: Vec<ProjectMock>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ProjectOrderUpdate {
     pub project_id: String,
     pub catalog_order: i64,
@@ -145,6 +206,8 @@ pub struct Project {
     pub wait_for_previous_ready: bool,
     pub enabled: bool,
     pub tags: Vec<String>,
+    #[serde(default)]
+    pub mock_summary: ProjectMockSummary,
     pub env_overrides: Vec<ProjectEnvOverride>,
     pub dependencies: Vec<ProjectDependency>,
     pub status: ProjectStatus,
@@ -197,6 +260,7 @@ impl Project {
             wait_for_previous_ready: false,
             enabled: true,
             tags: Vec::new(),
+            mock_summary: ProjectMockSummary::default(),
             env_overrides: Vec::new(),
             dependencies: Vec::new(),
             status: ProjectStatus::Idle,

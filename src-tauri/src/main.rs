@@ -1,6 +1,7 @@
 mod commands;
 mod db;
 mod diagnostics;
+mod mock_catalog;
 mod mocking;
 mod models;
 mod process_control;
@@ -61,6 +62,9 @@ fn main() {
             commands::delete_preset,
             commands::reorder_projects,
             commands::delete_project,
+            commands::get_project_mocks,
+            commands::save_project_mock,
+            commands::delete_project_mock,
             commands::start_projects,
             commands::stop_projects,
             commands::force_stop_projects

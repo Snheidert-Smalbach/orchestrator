@@ -495,6 +495,38 @@ input[type="checkbox"]:disabled {
       inset 0 0 0 1px rgb(var(--color-danger) / 0.22),
       0 12px 24px -24px rgb(var(--shadow-color) / 0.9);
   }
+
+  .console-matrix {
+    position: absolute;
+    inset: 0;
+    overflow: hidden;
+    pointer-events: none;
+    background:
+      radial-gradient(circle at top, rgb(var(--color-accent) / 0.06), transparent 34%),
+      linear-gradient(180deg, rgb(var(--color-ink) / 0.08), rgb(var(--color-ink) / 0.34));
+  }
+
+  .console-matrix-column {
+    position: absolute;
+    top: -48%;
+    color: rgb(var(--color-accent));
+    font-family: var(--font-mono);
+    line-height: 1.02;
+    white-space: pre;
+    text-shadow: 0 0 10px rgb(var(--color-accent) / 0.28);
+    animation: console-matrix-fall var(--matrix-duration, 12s) linear infinite;
+    animation-delay: var(--matrix-delay, 0s);
+  }
+}
+
+@keyframes console-matrix-fall {
+  0% {
+    transform: translate3d(0, -12%, 0);
+  }
+
+  100% {
+    transform: translate3d(0, 185%, 0);
+  }
 }
 
 ::selection {

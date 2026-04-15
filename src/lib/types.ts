@@ -4,6 +4,8 @@ export type RunMode = "script" | "command";
 export type ReadinessMode = "none" | "delay" | "port";
 export type LaunchMode = "service" | "record" | "mock" | "unknown";
 export type MockMatchMode = "auto" | "strict" | "path" | "unknown";
+export type MockSource = "captured" | "manual" | "unknown";
+export type MockKind = "rest" | "graphql" | "http_other" | "unknown";
 export type ProjectStatus =
   | "idle"
   | "starting"
@@ -24,6 +26,46 @@ export interface ProjectDependency {
   id: string;
   dependsOnProjectId: string;
   requiredForStart: boolean;
+}
+
+export interface MockHeader {
+  name: string;
+  value: string;
+}
+
+export interface ProjectMock {
+  id: string;
+  name: string;
+  source: MockSource;
+  kind: MockKind;
+  recordedAt: string;
+  notes: string | null;
+  requestMethod: string;
+  requestPath: string;
+  requestQuery: string;
+  requestHeaders: MockHeader[];
+  requestContentType: string | null;
+  requestBody: string;
+  responseStatusCode: number;
+  responseReasonPhrase: string;
+  responseHeaders: MockHeader[];
+  responseContentType: string | null;
+  responseBody: string;
+}
+
+export interface ProjectMockSummary {
+  totalCount: number;
+  graphqlCount: number;
+  restCount: number;
+  manualCount: number;
+  capturedCount: number;
+  lastUpdatedAt: string | null;
+  routes: string[];
+}
+
+export interface ProjectMockCollection {
+  summary: ProjectMockSummary;
+  mocks: ProjectMock[];
 }
 
 export interface ProjectOrderUpdate {
@@ -54,6 +96,7 @@ export interface Project {
   waitForPreviousReady: boolean;
   enabled: boolean;
   tags: string[];
+  mockSummary: ProjectMockSummary;
   envOverrides: ProjectEnvOverride[];
   dependencies: ProjectDependency[];
   status: ProjectStatus;

@@ -10,6 +10,27 @@ interface LogConsoleProps {
   selectedProjectId: string | null;
 }
 
+const MATRIX_CHARSET = "ABCDEFGHIJKLMNÑOPQRSTUVWXYZÁÉÍÓÚÜ0123456789¿?¡!<>/=+-{}[]";
+
+function createMatrixColumn(index: number) {
+  const length = 18 + (index % 10);
+  let text = "";
+  for (let cursor = 0; cursor < length; cursor += 1) {
+    const character = MATRIX_CHARSET[(index * 7 + cursor * 11) % MATRIX_CHARSET.length];
+    text += cursor === length - 1 ? character : `${character}\n`;
+  }
+
+  return {
+    id: `matrix-${index}`,
+    text,
+    left: 2 + (index * 4.7) % 94,
+    duration: 9 + (index % 6) * 1.4,
+    delay: -1 * ((index % 7) * 1.1),
+    opacity: 0.14 + (index % 5) * 0.05,
+    size: 8 + (index % 3),
+  };
+}
+
 function parseTimestamp(timestamp: string) {
   if (/^\d+$/.test(timestamp)) {
     return new Date(Number(timestamp));
@@ -66,6 +87,10 @@ export function LogConsole({ projects, selectedProjectId }: LogConsoleProps) {
   const projectNames = useMemo(
     () => new Map(projects.map((project) => [project.id, project.name])),
     [projects],
+  );
+  const matrixColumns = useMemo(
+    () => Array.from({ length: 20 }, (_, index) => createMatrixColumn(index)),
+    [],
   );
 
   const activeEntries = activeTab === "combined" ? combinedLogs : logs[activeTab] ?? [];
@@ -193,10 +218,27 @@ export function LogConsole({ projects, selectedProjectId }: LogConsoleProps) {
         </Tabs.List>
 
         <Tabs.Content value={activeTab} className="min-h-0 flex-1">
-          <ScrollArea.Root className="h-full bg-ink/55">
+          <ScrollArea.Root className="relative h-full overflow-hidden bg-ink/55">
+            <div aria-hidden className="console-matrix">
+              {matrixColumns.map((column) => (
+                <span
+                  key={column.id}
+                  className="console-matrix-column"
+                  style={{
+                    left: `${column.left}%`,
+                    opacity: column.opacity,
+                    fontSize: `${column.size}px`,
+                    ["--matrix-duration" as string]: `${column.duration}s`,
+                    ["--matrix-delay" as string]: `${column.delay}s`,
+                  }}
+                >
+                  {column.text}
+                </span>
+              ))}
+            </div>
             <ScrollArea.Viewport
               ref={(node) => setViewportRef(activeTab, node)}
-              className="h-full px-2 py-1.5"
+              className="relative z-10 h-full bg-[linear-gradient(180deg,rgba(2,8,20,0.18),rgba(2,8,20,0.08))] px-2 py-1.5"
               onScroll={(event) => handleViewportScroll(activeTab, event.currentTarget)}
             >
               {renderEntries(activeEntries, includeProjectName)}

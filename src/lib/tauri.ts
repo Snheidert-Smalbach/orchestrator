@@ -3,6 +3,9 @@ import { listen } from "@tauri-apps/api/event";
 import type {
   DetectedProject,
   LogPayload,
+  ProjectMock,
+  ProjectMockCollection,
+  ProjectMockSummary,
   ProcessDiagnostic,
   Preset,
   ProjectResourceUsage,
@@ -14,6 +17,7 @@ import type {
 } from "./types";
 
 const STORAGE_KEY = "back-orchestrator.mock.snapshot";
+const MOCK_STORAGE_PREFIX = "back-orchestrator.mock.registry.";
 
 const statusListeners = new Set<(payload: RuntimeStatusPayload) => void>();
 const logListeners = new Set<(payload: LogPayload) => void>();
@@ -80,6 +84,7 @@ function normalizeProject(project: Project, index: number): Project {
     launchMode: project.launchMode ?? "service",
     mockMatchMode: project.mockMatchMode ?? "auto",
     mockUnmatchedStatus: project.mockUnmatchedStatus ?? 404,
+    mockSummary: project.mockSummary ?? emptyMockSummary(),
   };
 }
 
@@ -94,8 +99,116 @@ function normalizeSnapshot(snapshot: Snapshot): Snapshot {
 
   return {
     ...snapshot,
-    projects: normalizedProjects,
+    projects: normalizedProjects.map((project) => ({
+      ...project,
+      mockSummary: readMockSummary(project.id),
+    })),
   };
+}
+
+function emptyMockSummary(): ProjectMockSummary {
+  return {
+    totalCount: 0,
+    graphqlCount: 0,
+    restCount: 0,
+    manualCount: 0,
+    capturedCount: 0,
+    lastUpdatedAt: null,
+    routes: [],
+  };
+}
+
+function mockStorageKey(projectId: string) {
+  return `${MOCK_STORAGE_PREFIX}${projectId}`;
+}
+
+function normalizeProjectMock(mock: ProjectMock, index: number): ProjectMock {
+  return {
+    ...mock,
+    id: mock.id || createId(`mock-${index}`),
+    name: mock.name?.trim() ? mock.name : `${mock.requestMethod || "GET"} ${mock.requestPath || "/"}`,
+    source: mock.source ?? "captured",
+    kind: mock.kind ?? "rest",
+    recordedAt: mock.recordedAt || new Date().toISOString(),
+    notes: mock.notes ?? null,
+    requestMethod: (mock.requestMethod || "GET").toUpperCase(),
+    requestPath: mock.requestPath?.trim() || "/",
+    requestQuery: mock.requestQuery ?? "",
+    requestHeaders: mock.requestHeaders ?? [],
+    requestContentType: mock.requestContentType ?? null,
+    requestBody: mock.requestBody ?? "",
+    responseStatusCode: Number(mock.responseStatusCode || 200),
+    responseReasonPhrase: mock.responseReasonPhrase ?? "OK",
+    responseHeaders: mock.responseHeaders ?? [],
+    responseContentType: mock.responseContentType ?? null,
+    responseBody: mock.responseBody ?? "",
+  };
+}
+
+function compareMockEntries(left: ProjectMock, right: ProjectMock) {
+  return (
+    new Date(right.recordedAt).getTime() - new Date(left.recordedAt).getTime() ||
+    left.requestPath.localeCompare(right.requestPath) ||
+    left.name.localeCompare(right.name)
+  );
+}
+
+function buildMockSummary(mocks: ProjectMock[]): ProjectMockSummary {
+  const routes = [...new Set(mocks.map((mock) => mock.requestPath).filter(Boolean))].slice(0, 4);
+  const sortedByDate = [...mocks].sort(compareMockEntries);
+
+  return {
+    totalCount: mocks.length,
+    graphqlCount: mocks.filter((mock) => mock.kind === "graphql").length,
+    restCount: mocks.filter((mock) => mock.kind === "rest" || mock.kind === "http_other").length,
+    manualCount: mocks.filter((mock) => mock.source === "manual").length,
+    capturedCount: mocks.filter((mock) => mock.source !== "manual").length,
+    lastUpdatedAt: sortedByDate[0]?.recordedAt ?? null,
+    routes,
+  };
+}
+
+function normalizeMockCollection(collection: ProjectMockCollection): ProjectMockCollection {
+  const mocks = (collection.mocks ?? []).map(normalizeProjectMock).sort(compareMockEntries);
+  return {
+    summary: buildMockSummary(mocks),
+    mocks,
+  };
+}
+
+function readMockRegistry(projectId: string): ProjectMockCollection {
+  const raw = window.localStorage.getItem(mockStorageKey(projectId));
+  if (!raw) {
+    return {
+      summary: emptyMockSummary(),
+      mocks: [],
+    };
+  }
+
+  const parsed = JSON.parse(raw) as ProjectMock[] | ProjectMockCollection;
+  if (Array.isArray(parsed)) {
+    const mocks = parsed.map(normalizeProjectMock).sort(compareMockEntries);
+    return {
+      summary: buildMockSummary(mocks),
+      mocks,
+    };
+  }
+
+  return normalizeMockCollection(parsed);
+}
+
+function saveMockRegistry(projectId: string, collection: ProjectMockCollection) {
+  const normalized = normalizeMockCollection(collection);
+  window.localStorage.setItem(mockStorageKey(projectId), JSON.stringify(normalized));
+  return normalized;
+}
+
+function readMockSummary(projectId: string) {
+  if (typeof window === "undefined") {
+    return emptyMockSummary();
+  }
+
+  return readMockRegistry(projectId).summary;
 }
 
 function buildDetectedSeed(options: {
@@ -199,6 +312,7 @@ function toProject(detected: DetectedProject): Project {
     waitForPreviousReady: false,
     enabled: true,
     tags: [],
+    mockSummary: emptyMockSummary(),
     envOverrides: [],
     dependencies: [],
     status: "idle",
@@ -557,6 +671,7 @@ export async function deleteProject(projectId: string) {
   }
 
   const snapshot = loadMockSnapshot();
+  window.localStorage.removeItem(mockStorageKey(projectId));
   const next = mergePresetIds({
     ...snapshot,
     projects: snapshot.projects.filter((project) => project.id !== projectId),
@@ -697,6 +812,47 @@ export async function forceStopProjects(projectIds?: string[]) {
   }
 
   return normalizedNext;
+}
+
+export async function getProjectMocks(projectId: string) {
+  if (isTauriRuntime()) {
+    const collection = await invoke<ProjectMockCollection>("get_project_mocks", { projectId });
+    return normalizeMockCollection(collection);
+  }
+
+  return readMockRegistry(projectId);
+}
+
+export async function saveProjectMock(projectId: string, mock: ProjectMock) {
+  if (isTauriRuntime()) {
+    const collection = await invoke<ProjectMockCollection>("save_project_mock", { projectId, mock });
+    return normalizeMockCollection(collection);
+  }
+
+  const current = readMockRegistry(projectId);
+  const nextMock = normalizeProjectMock(mock, current.mocks.length);
+  const nextMocks = current.mocks.some((entry) => entry.id === nextMock.id)
+    ? current.mocks.map((entry) => (entry.id === nextMock.id ? nextMock : entry))
+    : [...current.mocks, nextMock];
+
+  return saveMockRegistry(projectId, {
+    summary: buildMockSummary(nextMocks),
+    mocks: nextMocks,
+  });
+}
+
+export async function deleteProjectMock(projectId: string, mockId: string) {
+  if (isTauriRuntime()) {
+    const collection = await invoke<ProjectMockCollection>("delete_project_mock", { projectId, mockId });
+    return normalizeMockCollection(collection);
+  }
+
+  const current = readMockRegistry(projectId);
+  const nextMocks = current.mocks.filter((mock) => mock.id !== mockId);
+  return saveMockRegistry(projectId, {
+    summary: buildMockSummary(nextMocks),
+    mocks: nextMocks,
+  });
 }
 
 export async function listenRuntimeEvents(

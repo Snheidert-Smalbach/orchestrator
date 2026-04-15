@@ -246,8 +246,7 @@ pub async fn start_mock_server(
     let (stopped_tx, stopped_rx) = watch::channel(false);
     let project_id = project.id.clone();
     let RegistryLoad { entries, warnings } = load_registry(&db_path, &project.id)?;
-    let registry = Arc::new(entries);
-    let captures_count = registry.len();
+    let captures_count = entries.len();
 
     emit_log(
         &app,
@@ -277,11 +276,19 @@ pub async fn start_mock_server(
                     };
 
                     let app_handle = app.clone();
+                    let db_path = db_path.clone();
                     let project = project.clone();
                     let project_id = project_id.clone();
-                    let registry = registry.clone();
                     tokio::spawn(async move {
-                        if let Err(error) = handle_mock_connection(app_handle.clone(), project, registry, socket, address.to_string()).await {
+                        if let Err(error) = handle_mock_connection(
+                            app_handle.clone(),
+                            db_path,
+                            project,
+                            socket,
+                            address.to_string(),
+                        )
+                        .await
+                        {
                             emit_log(&app_handle, &project_id, "stderr", format!("Mock response error: {error}"));
                         }
                     });
@@ -350,16 +357,21 @@ async fn handle_proxy_connection(
 
 async fn handle_mock_connection(
     app: AppHandle,
+    db_path: PathBuf,
     project: Project,
-    registry: Arc<Vec<RecordedExchange>>,
     mut socket: TcpStream,
     remote_address: String,
 ) -> Result<()> {
     let request = read_http_request(&mut socket).await?;
     let request_view = build_request_record(&request);
+    let RegistryLoad { entries, warnings } = load_registry(&db_path, &project.id)?;
+
+    for warning in warnings {
+        emit_log(&app, &project.id, "stderr", warning);
+    }
 
     let response =
-        if let Some(exchange) = find_matching_exchange(&project, &registry, &request_view) {
+        if let Some(exchange) = find_matching_exchange(&project, &entries, &request_view) {
             emit_log(
                 &app,
                 &project.id,
@@ -1125,6 +1137,7 @@ mod tests {
             wait_for_previous_ready: false,
             enabled: true,
             tags: Vec::new(),
+            mock_summary: crate::models::ProjectMockSummary::default(),
             env_overrides: Vec::new(),
             dependencies: Vec::new(),
             status: ProjectStatus::Idle,
@@ -1159,9 +1172,10 @@ mod tests {
 
     fn temp_db_path() -> PathBuf {
         let unique = format!(
-            "orchestrator-mocking-{}-{}",
+            "orchestrator-mocking-{}-{}-{}",
             std::process::id(),
-            timestamp_now()
+            timestamp_now(),
+            uuid::Uuid::new_v4()
         );
         let root = std::env::temp_dir().join(unique);
         fs::create_dir_all(&root).expect("temp dir");
