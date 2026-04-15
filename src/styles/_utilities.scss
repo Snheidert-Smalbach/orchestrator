@@ -1,0 +1,903 @@
+@use "sass:map";
+
+$breakpoints: (
+  "sm": 640px,
+  "md": 768px,
+  "xl": 1280px,
+);
+
+$spacing-scale: (
+  "0.5": 0.125rem,
+  "1": 0.25rem,
+  "1.5": 0.375rem,
+  "2": 0.5rem,
+  "2.5": 0.625rem,
+  "3": 0.75rem,
+  "4": 1rem,
+  "5": 1.25rem,
+  "6": 1.5rem,
+);
+
+$size-scale: (
+  "0.5": 0.125rem,
+  "1.5": 0.375rem,
+  "2.5": 0.625rem,
+  "3": 0.75rem,
+  "3.5": 0.875rem,
+  "4": 1rem,
+  "5": 1.25rem,
+  "9": 2.25rem,
+  "12": 3rem,
+  "14": 3.5rem,
+);
+
+$pixel-widths: (
+  "[44px]": 44px,
+  "[48px]": 48px,
+  "[56px]": 56px,
+  "[58px]": 58px,
+  "[72px]": 72px,
+  "[88px]": 88px,
+  "[220px]": 220px,
+  "[260px]": 260px,
+  "[min(430px,92vw)]": min(430px, 92vw),
+  "[min(720px,92vw)]": min(720px, 92vw),
+  "[min(760px,92vw)]": min(760px, 92vw),
+  "[min(980px,92vw)]": min(980px, 92vw),
+);
+
+$min-widths: (
+  "[16px]": 16px,
+  "[44px]": 44px,
+);
+
+$max-heights: (
+  "[420px]": 420px,
+  "[82vh]": 82vh,
+  "[84vh]": 84vh,
+  "[85vh]": 85vh,
+  "[calc(84vh-84px)]": calc(84vh - 84px),
+);
+
+$font-sizes: (
+  "[8px]": 8px,
+  "[9px]": 9px,
+  "[10px]": 10px,
+  "[11px]": 11px,
+  "[12px]": 12px,
+  "[13px]": 13px,
+  "[15px]": 15px,
+  "xs": 0.75rem,
+  "sm": 0.875rem,
+  "base": 1rem,
+  "xl": 1.25rem,
+);
+
+$line-heights: (
+  "4": 1rem,
+  "5": 1.25rem,
+  "[1.3]": 1.3,
+);
+
+$tracking-values: (
+  "[0.08em]": 0.08em,
+  "[0.12em]": 0.12em,
+  "[0.14em]": 0.14em,
+  "[0.16em]": 0.16em,
+  "[0.18em]": 0.18em,
+  "[0.2em]": 0.2em,
+  "[0.22em]": 0.22em,
+  "[0.24em]": 0.24em,
+);
+
+$z-values: (
+  "10": 10,
+  "20": 20,
+  "40": 40,
+  "50": 50,
+);
+
+@function theme-color($name, $alpha: null) {
+  @if $alpha == null {
+    @return rgb(var(--#{$name}));
+  }
+
+  @return rgb(var(--#{$name}) / $alpha);
+}
+
+@mixin utility($token) {
+  [class~="#{$token}"] {
+    @content;
+  }
+}
+
+@mixin utility-hover($token) {
+  [class~="#{$token}"]:hover {
+    @content;
+  }
+}
+
+@mixin utility-active($token) {
+  [class~="#{$token}"]:active {
+    @content;
+  }
+}
+
+@mixin utility-disabled($token) {
+  [class~="#{$token}"]:disabled {
+    @content;
+  }
+}
+
+@mixin utility-data-active($token) {
+  [class~="#{$token}"][data-state="active"] {
+    @content;
+  }
+}
+
+@mixin utility-group-hover($token) {
+  .group:hover [class~="#{$token}"] {
+    @content;
+  }
+}
+
+@mixin utility-space-y($token) {
+  [class~="#{$token}"] > :not([hidden]) ~ :not([hidden]) {
+    @content;
+  }
+}
+
+@mixin utility-media($breakpoint, $token) {
+  @media (min-width: map.get($breakpoints, $breakpoint)) {
+    [class~="#{$breakpoint}:#{$token}"] {
+      @content;
+    }
+  }
+}
+
+@include utility("fixed") {
+  position: fixed;
+}
+
+@include utility("absolute") {
+  position: absolute;
+}
+
+@include utility("relative") {
+  position: relative;
+}
+
+@include utility("sticky") {
+  position: sticky;
+}
+
+@include utility("block") {
+  display: block;
+}
+
+@include utility("hidden") {
+  display: none;
+}
+
+@include utility("flex") {
+  display: flex;
+}
+
+@include utility("inline-flex") {
+  display: inline-flex;
+}
+
+@include utility("grid") {
+  display: grid;
+}
+
+@include utility("flex-1") {
+  flex: 1 1 0%;
+}
+
+@include utility("flex-col") {
+  flex-direction: column;
+}
+
+@include utility("flex-wrap") {
+  flex-wrap: wrap;
+}
+
+@include utility("shrink-0") {
+  flex-shrink: 0;
+}
+
+@include utility("min-w-0") {
+  min-width: 0;
+}
+
+@include utility("min-h-0") {
+  min-height: 0;
+}
+
+@include utility("min-w-full") {
+  min-width: 100%;
+}
+
+@include utility("h-full") {
+  height: 100%;
+}
+
+@include utility("h-screen") {
+  height: 100vh;
+}
+
+@include utility("w-full") {
+  width: 100%;
+}
+
+@include utility("max-w-[1900px]") {
+  max-width: 1900px;
+}
+
+@include utility("min-h-[220px]") {
+  min-height: 220px;
+}
+
+@each $token, $value in $size-scale {
+  @include utility("w-#{$token}") {
+    width: $value;
+  }
+
+  @include utility("h-#{$token}") {
+    height: $value;
+  }
+}
+
+@each $token, $value in $pixel-widths {
+  @include utility("w-#{$token}") {
+    width: $value;
+  }
+}
+
+@each $token, $value in $min-widths {
+  @include utility("min-w-#{$token}") {
+    min-width: $value;
+  }
+}
+
+@each $token, $value in $max-heights {
+  @include utility("max-h-#{$token}") {
+    max-height: $value;
+  }
+}
+
+@include utility("overflow-hidden") {
+  overflow: hidden;
+}
+
+@include utility("overflow-auto") {
+  overflow: auto;
+}
+
+@include utility("overflow-x-auto") {
+  overflow-x: auto;
+}
+
+@include utility("items-center") {
+  align-items: center;
+}
+
+@include utility("items-start") {
+  align-items: flex-start;
+}
+
+@include utility("justify-between") {
+  justify-content: space-between;
+}
+
+@include utility("justify-center") {
+  justify-content: center;
+}
+
+@include utility("justify-end") {
+  justify-content: flex-end;
+}
+
+@include utility("text-left") {
+  text-align: left;
+}
+
+@include utility("align-middle") {
+  vertical-align: middle;
+}
+
+@include utility("mx-auto") {
+  margin-inline: auto;
+}
+
+@include utility("mt-auto") {
+  margin-top: auto;
+}
+
+@include utility("ml-1") {
+  margin-left: 0.25rem;
+}
+
+@include utility("mr-2") {
+  margin-right: 0.5rem;
+}
+
+@include utility("mt-0.5") {
+  margin-top: 0.125rem;
+}
+
+@include utility("mt-1") {
+  margin-top: 0.25rem;
+}
+
+@include utility("mt-2") {
+  margin-top: 0.5rem;
+}
+
+@include utility("mt-4") {
+  margin-top: 1rem;
+}
+
+@each $token, $value in $spacing-scale {
+  @include utility("p-#{$token}") {
+    padding: $value;
+  }
+
+  @include utility("px-#{$token}") {
+    padding-inline: $value;
+  }
+
+  @include utility("py-#{$token}") {
+    padding-block: $value;
+  }
+
+  @include utility("gap-#{$token}") {
+    gap: $value;
+  }
+
+  @include utility("space-y-#{$token}") {
+    --tw-space-y-reverse: 0;
+  }
+
+  @include utility-space-y("space-y-#{$token}") {
+    margin-top: calc(#{$value} * calc(1 - var(--tw-space-y-reverse)));
+    margin-bottom: calc(#{$value} * var(--tw-space-y-reverse));
+  }
+}
+
+@include utility("py-px") {
+  padding-block: 1px;
+}
+
+@include utility("gap-x-2") {
+  column-gap: 0.5rem;
+}
+
+@include utility("pb-0.5") {
+  padding-bottom: 0.125rem;
+}
+
+@include utility("pb-1.5") {
+  padding-bottom: 0.375rem;
+}
+
+@include utility("pb-2") {
+  padding-bottom: 0.5rem;
+}
+
+@include utility("pt-0.5") {
+  padding-top: 0.125rem;
+}
+
+@include utility("font-mono") {
+  font-family: var(--font-mono);
+}
+
+@include utility("font-semibold") {
+  font-weight: 600;
+}
+
+@include utility("uppercase") {
+  text-transform: uppercase;
+}
+
+@each $token, $value in $font-sizes {
+  @include utility("text-#{$token}") {
+    font-size: $value;
+  }
+}
+
+@include utility("text-xs") {
+  line-height: 1rem;
+}
+
+@include utility("text-sm") {
+  line-height: 1.25rem;
+}
+
+@include utility("text-base") {
+  line-height: 1.5rem;
+}
+
+@include utility("text-xl") {
+  line-height: 1.75rem;
+}
+
+@each $token, $value in $line-heights {
+  @include utility("leading-#{$token}") {
+    line-height: $value;
+  }
+}
+
+@each $token, $value in $tracking-values {
+  @include utility("tracking-#{$token}") {
+    letter-spacing: $value;
+  }
+}
+
+@include utility("tracking-tight") {
+  letter-spacing: -0.025em;
+}
+
+@include utility("truncate") {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@include utility("break-words") {
+  overflow-wrap: break-word;
+}
+
+@include utility("whitespace-nowrap") {
+  white-space: nowrap;
+}
+
+@include utility("whitespace-pre-wrap") {
+  white-space: pre-wrap;
+}
+
+@include utility("border") {
+  border-width: 1px;
+  border-style: solid;
+}
+
+@include utility("border-b") {
+  border-bottom-width: 1px;
+  border-bottom-style: solid;
+}
+
+@include utility("border-r") {
+  border-right-width: 1px;
+  border-right-style: solid;
+}
+
+@include utility("border-dashed") {
+  border-style: dashed;
+}
+
+@include utility("border-collapse") {
+  border-collapse: collapse;
+}
+
+@include utility("border-separate") {
+  border-collapse: separate;
+}
+
+@include utility("border-spacing-y-1") {
+  border-spacing: 0 0.25rem;
+}
+
+@include utility("rounded-full") {
+  border-radius: 9999px !important;
+}
+
+@include utility("bg-transparent") {
+  background-color: transparent;
+}
+
+@include utility("bg-[linear-gradient(180deg,rgba(2,8,20,0.18),rgba(2,8,20,0.08))]") {
+  background-image: linear-gradient(180deg, rgba(2, 8, 20, 0.18), rgba(2, 8, 20, 0.08));
+}
+
+$background-colors: (
+  "accent/10": theme-color("color-accent", 0.1),
+  "accent/12": theme-color("color-accent", 0.12),
+  "accent/14": theme-color("color-accent", 0.14),
+  "danger": theme-color("color-danger"),
+  "danger/10": theme-color("color-danger", 0.1),
+  "danger/12": theme-color("color-danger", 0.12),
+  "danger/14": theme-color("color-danger", 0.14),
+  "danger/16": theme-color("color-danger", 0.16),
+  "info": theme-color("color-info"),
+  "info/10": theme-color("color-info", 0.1),
+  "info/14": theme-color("color-info", 0.14),
+  "info/16": theme-color("color-info", 0.16),
+  "ink/30": theme-color("color-ink", 0.3),
+  "ink/55": theme-color("color-ink", 0.55),
+  "ink/58": theme-color("color-ink", 0.58),
+  "ink/62": theme-color("color-ink", 0.62),
+  "line/45": theme-color("color-line", 0.45),
+  "line/55": theme-color("color-line", 0.55),
+  "line/70": theme-color("color-line", 0.7),
+  "ok": theme-color("color-ok"),
+  "ok/12": theme-color("color-ok", 0.12),
+  "ok/14": theme-color("color-ok", 0.14),
+  "ok/16": theme-color("color-ok", 0.16),
+  "panel": theme-color("color-panel"),
+  "panel/45": theme-color("color-panel", 0.45),
+  "panel/55": theme-color("color-panel", 0.55),
+  "panel/80": theme-color("color-panel", 0.8),
+  "panel/82": theme-color("color-panel", 0.82),
+  "panel/88": theme-color("color-panel", 0.88),
+  "panelSoft/30": theme-color("color-panel-soft", 0.3),
+  "panelSoft/46": theme-color("color-panel-soft", 0.46),
+  "panelSoft/70": theme-color("color-panel-soft", 0.7),
+  "panelSoft/75": theme-color("color-panel-soft", 0.75),
+  "textSoft/55": theme-color("color-text-soft", 0.55),
+  "warn": theme-color("color-warn"),
+  "warn/12": theme-color("color-warn", 0.12),
+  "warn/14": theme-color("color-warn", 0.14),
+  "warn/16": theme-color("color-warn", 0.16),
+  "white/[0.015]": rgb(255 255 255 / 0.015),
+  "white/[0.03]": rgb(255 255 255 / 0.03),
+);
+
+@each $token, $value in $background-colors {
+  @include utility("bg-#{$token}") {
+    background-color: $value;
+  }
+}
+
+$hover-background-colors: (
+  "accent/16": theme-color("color-accent", 0.16),
+  "accent/20": theme-color("color-accent", 0.2),
+  "danger/18": theme-color("color-danger", 0.18),
+  "danger/22": theme-color("color-danger", 0.22),
+  "danger/24": theme-color("color-danger", 0.24),
+  "info/22": theme-color("color-info", 0.22),
+  "ok/22": theme-color("color-ok", 0.22),
+  "panelSoft": theme-color("color-panel-soft"),
+  "panelSoft/70": theme-color("color-panel-soft", 0.7),
+  "panelSoft/72": theme-color("color-panel-soft", 0.72),
+  "panelSoft/75": theme-color("color-panel-soft", 0.75),
+  "panelSoft/80": theme-color("color-panel-soft", 0.8),
+  "warn/22": theme-color("color-warn", 0.22),
+  "white/[0.045]": rgb(255 255 255 / 0.045),
+  "white/[0.06]": rgb(255 255 255 / 0.06),
+);
+
+@each $token, $value in $hover-background-colors {
+  @include utility-hover("hover:bg-#{$token}") {
+    background-color: $value;
+  }
+}
+
+@include utility-active("active:bg-accent/28") {
+  background-color: theme-color("color-accent", 0.28);
+}
+
+@include utility-group-hover("group-hover:bg-accent/55") {
+  background-color: theme-color("color-accent", 0.55);
+}
+
+$text-colors: (
+  "accent": theme-color("color-accent"),
+  "accent/80": theme-color("color-accent", 0.8),
+  "accent/95": theme-color("color-accent", 0.95),
+  "current/80": color-mix(in srgb, currentColor 80%, transparent),
+  "danger": theme-color("color-danger"),
+  "info": theme-color("color-info"),
+  "ok": theme-color("color-ok"),
+  "textMuted": theme-color("color-text-muted"),
+  "textSoft": theme-color("color-text-soft"),
+  "textSoft/90": theme-color("color-text-soft", 0.9),
+  "textStrong": theme-color("color-text-strong"),
+  "warn": theme-color("color-warn"),
+);
+
+@each $token, $value in $text-colors {
+  @include utility("text-#{$token}") {
+    color: $value;
+  }
+}
+
+$border-colors: (
+  "accent/35": theme-color("color-accent", 0.35),
+  "accent/40": theme-color("color-accent", 0.4),
+  "accent/45": theme-color("color-accent", 0.45),
+  "danger/35": theme-color("color-danger", 0.35),
+  "danger/40": theme-color("color-danger", 0.4),
+  "info/35": theme-color("color-info", 0.35),
+  "ink/15": theme-color("color-ink", 0.15),
+  "line": theme-color("color-line"),
+  "line/60": theme-color("color-line", 0.6),
+  "line/70": theme-color("color-line", 0.7),
+  "line/80": theme-color("color-line", 0.8),
+  "ok/35": theme-color("color-ok", 0.35),
+  "ok/40": theme-color("color-ok", 0.4),
+  "transparent": transparent,
+  "warn/35": theme-color("color-warn", 0.35),
+  "warn/40": theme-color("color-warn", 0.4),
+);
+
+@each $token, $value in $border-colors {
+  @include utility("border-#{$token}") {
+    border-color: $value;
+  }
+}
+
+$shadow-utilities: (
+  "[0_0_14px_rgba(250,204,21,0.4)]": 0 0 14px rgba(250, 204, 21, 0.4),
+  "[0_0_14px_rgba(34,197,94,0.4)]": 0 0 14px rgba(34, 197, 94, 0.4),
+  "[0_0_14px_rgba(35,213,246,0.4)]": 0 0 14px rgba(35, 213, 246, 0.4),
+  "[0_0_16px_rgba(248,113,113,0.42)]": 0 0 16px rgba(248, 113, 113, 0.42),
+  "[0_12px_28px_-18px_rgba(2,8,20,0.9)]": 0 12px 28px -18px rgba(2, 8, 20, 0.9),
+  "[inset_0_-1px_0_rgb(var(--color-line)/0.14)]": inset 0 -1px 0 rgb(var(--color-line) / 0.14),
+  "[inset_0_0_0_1px_rgba(248,113,113,0.2)]": inset 0 0 0 1px rgba(248, 113, 113, 0.2),
+  "[inset_0_0_0_1px_rgba(250,204,21,0.18)]": inset 0 0 0 1px rgba(250, 204, 21, 0.18),
+  "[inset_0_0_0_1px_rgba(250,204,21,0.2)]": inset 0 0 0 1px rgba(250, 204, 21, 0.2),
+  "[inset_0_0_0_1px_rgba(255,255,255,0.03)]": inset 0 0 0 1px rgba(255, 255, 255, 0.03),
+  "[inset_0_0_0_1px_rgba(34,197,94,0.18)]": inset 0 0 0 1px rgba(34, 197, 94, 0.18),
+  "[inset_0_0_0_1px_rgba(35,213,246,0.18)]": inset 0 0 0 1px rgba(35, 213, 246, 0.18),
+  "[inset_0_0_0_1px_rgba(35,213,246,0.32),0_0_0_1px_rgba(35,213,246,0.18)]": (inset 0 0 0 1px rgba(35, 213, 246, 0.32), 0 0 0 1px rgba(35, 213, 246, 0.18)),
+);
+
+@each $token, $value in $shadow-utilities {
+  @include utility("shadow-#{$token}") {
+    box-shadow: $value;
+  }
+}
+
+@include utility("cursor-pointer") {
+  cursor: pointer;
+}
+
+@include utility("cursor-grab") {
+  cursor: grab;
+}
+
+@include utility("cursor-col-resize") {
+  cursor: col-resize;
+}
+
+@include utility("cursor-row-resize") {
+  cursor: row-resize;
+}
+
+@include utility-active("active:cursor-grabbing") {
+  cursor: grabbing;
+}
+
+@include utility-disabled("disabled:cursor-not-allowed") {
+  cursor: not-allowed;
+}
+
+@include utility("pointer-events-none") {
+  pointer-events: none;
+}
+
+@include utility("opacity-55") {
+  opacity: 0.55;
+}
+
+@include utility("opacity-60") {
+  opacity: 0.6;
+}
+
+@include utility("opacity-70") {
+  opacity: 0.7;
+}
+
+@include utility-disabled("disabled:opacity-60") {
+  opacity: 0.6;
+}
+
+@keyframes tw-compat-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@include utility("animate-spin") {
+  animation: tw-compat-spin 1s linear infinite;
+}
+
+@include utility("transition") {
+  transition-property: color, background-color, border-color, opacity, box-shadow, transform, filter, backdrop-filter;
+  transition-duration: 150ms;
+  transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+@include utility("transition-[background,opacity]") {
+  transition-property: background, opacity;
+  transition-duration: 150ms;
+  transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+@include utility("transition-[background,box-shadow,border-color]") {
+  transition-property: background, box-shadow, border-color;
+  transition-duration: 150ms;
+  transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+@include utility("duration-150") {
+  transition-duration: 150ms;
+}
+
+@include utility("backdrop-blur") {
+  backdrop-filter: blur(8px);
+}
+
+@include utility("backdrop-blur-sm") {
+  backdrop-filter: blur(4px);
+}
+
+@include utility("backdrop-blur-xl") {
+  backdrop-filter: blur(24px);
+}
+
+@include utility("top-0") {
+  top: 0;
+}
+
+@include utility("top-full") {
+  top: 100%;
+}
+
+@include utility("top-1/2") {
+  top: 50%;
+}
+
+@include utility("top-10") {
+  top: 2.5rem;
+}
+
+@include utility("right-0") {
+  right: 0;
+}
+
+@include utility("-right-1") {
+  right: -0.25rem;
+}
+
+@include utility("-top-1") {
+  top: -0.25rem;
+}
+
+@include utility("left-1/2") {
+  left: 50%;
+}
+
+@include utility("inset-0") {
+  inset: 0;
+}
+
+@include utility("inset-x-3") {
+  left: 0.75rem;
+  right: 0.75rem;
+}
+
+@include utility("-translate-x-1/2") {
+  --tw-translate-x: -50%;
+}
+
+@include utility("-translate-y-1/2") {
+  --tw-translate-y: -50%;
+}
+
+[class~="-translate-x-1/2"],
+[class~="-translate-y-1/2"] {
+  transform: translate(var(--tw-translate-x, 0), var(--tw-translate-y, 0));
+}
+
+@include utility-hover("hover:-translate-y-0") {
+  transform: translateY(0) !important;
+}
+
+@include utility("grid-cols-2") {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+@include utility("[grid-column:1/-1]") {
+  grid-column: 1 / -1;
+}
+
+@include utility("[grid-template-columns:auto_minmax(0,1fr)]") {
+  grid-template-columns: auto minmax(0, 1fr);
+}
+
+@include utility("[grid-template-columns:repeat(auto-fit,minmax(140px,1fr))]") {
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+}
+
+@include utility("[grid-template-columns:repeat(auto-fit,minmax(150px,1fr))]") {
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+}
+
+@include utility("[grid-template-columns:repeat(auto-fit,minmax(160px,1fr))]") {
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+}
+
+@include utility("[grid-template-columns:repeat(auto-fit,minmax(180px,1fr))]") {
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+}
+
+@each $token, $value in $z-values {
+  @include utility("z-#{$token}") {
+    z-index: $value;
+  }
+}
+
+@include utility-group-hover("group-hover:h-16") {
+  height: 4rem;
+}
+
+@include utility-group-hover("group-hover:w-20") {
+  width: 5rem;
+}
+
+@include utility-data-active("data-[state=active]:bg-accent/10") {
+  background-color: theme-color("color-accent", 0.1);
+}
+
+@include utility-data-active("data-[state=active]:border-accent/30") {
+  border-color: theme-color("color-accent", 0.3);
+}
+
+@include utility-data-active("data-[state=active]:text-accent") {
+  color: theme-color("color-accent");
+}
+
+@include utility-media("sm", "grid-cols-2") {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+@include utility-media("sm", "col-span-2") {
+  grid-column: span 2 / span 2;
+}
+
+@include utility-media("md", "flex") {
+  display: flex;
+}
+
+@include utility-media("md", "grid-cols-2") {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+@include utility-media("md", "grid-cols-[1fr_auto_auto_auto]") {
+  grid-template-columns: 1fr auto auto auto;
+}
+
+@include utility-media("md", "grid-cols-[auto_auto_1fr]") {
+  grid-template-columns: auto auto 1fr;
+}
+
+@include utility-media("md", "grid-cols-[minmax(0,1.9fr)_minmax(0,1.15fr)_minmax(0,1fr)]") {
+  grid-template-columns: minmax(0, 1.9fr) minmax(0, 1.15fr) minmax(0, 1fr);
+}
+
+@include utility-media("xl", "grid-cols-2") {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+@include utility-media("xl", "grid-cols-[260px_minmax(0,1fr)]") {
+  grid-template-columns: 260px minmax(0, 1fr);
+}
+
+@include utility-media("xl", "grid-cols-[90px_minmax(0,1fr)_minmax(0,0.8fr)]") {
+  grid-template-columns: 90px minmax(0, 1fr) minmax(0, 0.8fr);
+}
+
+@include utility-media("xl", "grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)]") {
+  grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr);
+}
+
+@include utility-media("xl", "grid-cols-[minmax(0,1fr)_120px_120px]") {
+  grid-template-columns: minmax(0, 1fr) 120px 120px;
+}
+
+@include utility-media("xl", "grid-cols-[minmax(0,1fr)_180px]") {
+  grid-template-columns: minmax(0, 1fr) 180px;
+}

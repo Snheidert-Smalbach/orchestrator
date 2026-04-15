@@ -5,7 +5,7 @@ Desktop app local para descubrir, configurar y arrancar microservicios desde una
 ## Stack
 - Tauri + Rust
 - React + TypeScript + Vite
-- Tailwind + Radix
+- SCSS + Radix
 - Zustand
 - SQLite local con rusqlite
 

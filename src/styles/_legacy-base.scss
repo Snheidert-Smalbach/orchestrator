@@ -1,7 +1,3 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
-
 :root {
   font-family: "Segoe UI Variable", Bahnschrift, sans-serif;
   color-scheme: dark;
@@ -456,67 +452,65 @@ input[type="checkbox"]:disabled {
   cursor: not-allowed;
 }
 
-@layer components {
-  .surface-panel {
-    background: rgb(var(--color-panel));
-    box-shadow: 0 20px 40px -34px rgb(var(--shadow-color) / 0.96);
-    backdrop-filter: none;
-  }
+.surface-panel {
+  background: rgb(var(--color-panel));
+  box-shadow: 0 20px 40px -34px rgb(var(--shadow-color) / 0.96);
+  backdrop-filter: none;
+}
 
-  .surface-panel-soft {
-    background: rgb(var(--color-panel-soft));
-    box-shadow: 0 16px 34px -30px rgb(var(--shadow-color) / 0.94);
-    backdrop-filter: none;
-  }
+.surface-panel-soft {
+  background: rgb(var(--color-panel-soft));
+  box-shadow: 0 16px 34px -30px rgb(var(--shadow-color) / 0.94);
+  backdrop-filter: none;
+}
 
-  .surface-divider {
-    box-shadow: inset 0 -1px 0 rgb(var(--color-line) / 0.16);
-  }
+.surface-divider {
+  box-shadow: inset 0 -1px 0 rgb(var(--color-line) / 0.16);
+}
 
-  .surface-divider-top {
-    box-shadow: inset 0 1px 0 rgb(var(--color-line) / 0.16);
-  }
+.surface-divider-top {
+  box-shadow: inset 0 1px 0 rgb(var(--color-line) / 0.16);
+}
 
-  .surface-chip {
-    background: rgb(var(--color-panel-soft));
-    box-shadow: 0 10px 22px -22px rgb(var(--shadow-color) / 0.92);
-  }
+.surface-chip {
+  background: rgb(var(--color-panel-soft));
+  box-shadow: 0 10px 22px -22px rgb(var(--shadow-color) / 0.92);
+}
 
-  .surface-banner-warn {
-    background: rgb(var(--color-warn) / 0.14);
-    box-shadow:
-      inset 0 0 0 1px rgb(var(--color-warn) / 0.22),
-      0 12px 24px -24px rgb(var(--shadow-color) / 0.9);
-  }
+.surface-banner-warn {
+  background: rgb(var(--color-warn) / 0.14);
+  box-shadow:
+    inset 0 0 0 1px rgb(var(--color-warn) / 0.22),
+    0 12px 24px -24px rgb(var(--shadow-color) / 0.9);
+}
 
-  .surface-banner-danger {
-    background: rgb(var(--color-danger) / 0.14);
-    box-shadow:
-      inset 0 0 0 1px rgb(var(--color-danger) / 0.22),
-      0 12px 24px -24px rgb(var(--shadow-color) / 0.9);
-  }
+.surface-banner-danger {
+  background: rgb(var(--color-danger) / 0.14);
+  box-shadow:
+    inset 0 0 0 1px rgb(var(--color-danger) / 0.22),
+    0 12px 24px -24px rgb(var(--shadow-color) / 0.9);
+}
 
-  .console-matrix {
-    position: absolute;
-    inset: 0;
-    overflow: hidden;
-    pointer-events: none;
-    background:
-      radial-gradient(circle at top, rgb(var(--color-accent) / 0.06), transparent 34%),
-      linear-gradient(180deg, rgb(var(--color-ink) / 0.08), rgb(var(--color-ink) / 0.34));
-  }
+.console-matrix {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+  background:
+    radial-gradient(circle at top, rgb(var(--color-accent) / 0.06), transparent 34%),
+    linear-gradient(180deg, rgb(var(--color-ink) / 0.08), rgb(var(--color-ink) / 0.34));
+}
 
-  .console-matrix-column {
-    position: absolute;
-    top: -48%;
-    color: rgb(var(--color-accent));
-    font-family: var(--font-mono);
-    line-height: 1.02;
-    white-space: pre;
-    text-shadow: 0 0 10px rgb(var(--color-accent) / 0.28);
-    animation: console-matrix-fall var(--matrix-duration, 12s) linear infinite;
-    animation-delay: var(--matrix-delay, 0s);
-  }
+.console-matrix-column {
+  position: absolute;
+  top: -48%;
+  color: rgb(var(--color-accent));
+  font-family: var(--font-mono);
+  line-height: 1.02;
+  white-space: pre;
+  text-shadow: 0 0 10px rgb(var(--color-accent) / 0.28);
+  animation: console-matrix-fall var(--matrix-duration, 12s) linear infinite;
+  animation-delay: var(--matrix-delay, 0s);
 }
 
 @keyframes console-matrix-fall {
