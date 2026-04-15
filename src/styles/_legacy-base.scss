@@ -17,14 +17,23 @@
   --color-danger: 248 113 113;
   --color-info: 35 213 246;
   --shadow-color: 2 10 24;
-  --radius-lg: 22px;
-  --radius-md: 16px;
-  --radius-sm: 12px;
+  --radius-lg: 0px;
+  --radius-md: 0px;
+  --radius-sm: 0px;
   --app-background:
     radial-gradient(circle at 18% 18%, rgb(35 213 246 / 0.2), transparent 24%),
     radial-gradient(circle at 82% 18%, rgb(139 255 77 / 0.12), transparent 20%),
-    radial-gradient(circle at 50% 100%, rgb(96 165 250 / 0.12), transparent 30%),
-    linear-gradient(160deg, rgb(2 8 20) 0%, rgb(4 16 34) 45%, rgb(10 24 46) 100%);
+    radial-gradient(
+      circle at 50% 100%,
+      rgb(96 165 250 / 0.12),
+      transparent 30%
+    ),
+    linear-gradient(
+      160deg,
+      rgb(2 8 20) 0%,
+      rgb(4 16 34) 45%,
+      rgb(10 24 46) 100%
+    );
   --app-overlay:
     linear-gradient(135deg, rgb(255 255 255 / 0.04), transparent 38%),
     radial-gradient(circle at 30% 0%, rgb(35 213 246 / 0.1), transparent 36%);
@@ -56,8 +65,17 @@
   --app-background:
     radial-gradient(circle at 18% 18%, rgb(35 213 246 / 0.2), transparent 24%),
     radial-gradient(circle at 82% 18%, rgb(139 255 77 / 0.12), transparent 20%),
-    radial-gradient(circle at 50% 100%, rgb(96 165 250 / 0.12), transparent 30%),
-    linear-gradient(160deg, rgb(2 8 20) 0%, rgb(4 16 34) 45%, rgb(10 24 46) 100%);
+    radial-gradient(
+      circle at 50% 100%,
+      rgb(96 165 250 / 0.12),
+      transparent 30%
+    ),
+    linear-gradient(
+      160deg,
+      rgb(2 8 20) 0%,
+      rgb(4 16 34) 45%,
+      rgb(10 24 46) 100%
+    );
   --app-overlay:
     linear-gradient(135deg, rgb(255 255 255 / 0.04), transparent 38%),
     radial-gradient(circle at 30% 0%, rgb(35 213 246 / 0.1), transparent 36%);
@@ -90,7 +108,12 @@
     radial-gradient(circle at 14% 12%, rgb(34 211 238 / 0.18), transparent 22%),
     radial-gradient(circle at 88% 12%, rgb(163 230 53 / 0.12), transparent 20%),
     radial-gradient(circle at 80% 92%, rgb(59 130 246 / 0.12), transparent 28%),
-    linear-gradient(160deg, rgb(247 251 255) 0%, rgb(237 246 252) 52%, rgb(220 233 244) 100%);
+    linear-gradient(
+      160deg,
+      rgb(247 251 255) 0%,
+      rgb(237 246 252) 52%,
+      rgb(220 233 244) 100%
+    );
   --app-overlay:
     linear-gradient(135deg, rgb(255 255 255 / 0.45), transparent 42%),
     radial-gradient(circle at 32% 0%, rgb(14 165 233 / 0.08), transparent 36%);
@@ -123,12 +146,21 @@
     radial-gradient(circle at 15% 14%, rgb(251 146 60 / 0.16), transparent 22%),
     radial-gradient(circle at 85% 18%, rgb(245 158 11 / 0.09), transparent 18%),
     radial-gradient(circle at 62% 100%, rgb(153 27 27 / 0.12), transparent 32%),
-    linear-gradient(160deg, rgb(18 10 6) 0%, rgb(31 17 13) 48%, rgb(54 27 18) 100%);
+    linear-gradient(
+      160deg,
+      rgb(18 10 6) 0%,
+      rgb(31 17 13) 48%,
+      rgb(54 27 18) 100%
+    );
   --app-overlay:
     linear-gradient(135deg, rgb(255 248 235 / 0.06), transparent 40%),
     radial-gradient(circle at 0% 100%, rgb(255 199 123 / 0.08), transparent 28%);
   --app-pattern:
-    repeating-linear-gradient(135deg, rgb(255 214 170 / 0.08) 0 12px, transparent 12px 28px),
+    repeating-linear-gradient(
+      135deg,
+      rgb(255 214 170 / 0.08) 0 12px,
+      transparent 12px 28px
+    ),
     linear-gradient(rgb(255 255 255 / 0.04) 1px, transparent 1px);
   --app-pattern-size: 220px 220px, 100% 30px;
   --app-pattern-opacity: 0.4;
@@ -156,12 +188,21 @@
     radial-gradient(circle at 12% 12%, rgb(251 146 60 / 0.16), transparent 22%),
     radial-gradient(circle at 88% 10%, rgb(245 158 11 / 0.1), transparent 19%),
     radial-gradient(circle at 74% 100%, rgb(190 24 93 / 0.08), transparent 26%),
-    linear-gradient(160deg, rgb(252 247 240) 0%, rgb(247 236 224) 55%, rgb(236 219 204) 100%);
+    linear-gradient(
+      160deg,
+      rgb(252 247 240) 0%,
+      rgb(247 236 224) 55%,
+      rgb(236 219 204) 100%
+    );
   --app-overlay:
     linear-gradient(135deg, rgb(255 255 255 / 0.55), transparent 42%),
     radial-gradient(circle at 0% 100%, rgb(251 191 36 / 0.08), transparent 26%);
   --app-pattern:
-    repeating-linear-gradient(135deg, rgb(180 83 9 / 0.06) 0 12px, transparent 12px 26px),
+    repeating-linear-gradient(
+      135deg,
+      rgb(180 83 9 / 0.06) 0 12px,
+      transparent 12px 26px
+    ),
     linear-gradient(rgb(255 255 255 / 0.18) 1px, transparent 1px);
   --app-pattern-size: 220px 220px, 100% 30px;
   --app-pattern-opacity: 0.34;
@@ -189,14 +230,24 @@
     radial-gradient(circle at 10% 16%, rgb(45 212 191 / 0.14), transparent 20%),
     radial-gradient(circle at 92% 12%, rgb(251 146 60 / 0.1), transparent 16%),
     radial-gradient(circle at 78% 100%, rgb(8 145 178 / 0.12), transparent 30%),
-    linear-gradient(165deg, rgb(4 15 25) 0%, rgb(8 28 43) 46%, rgb(10 44 58) 100%);
+    linear-gradient(
+      165deg,
+      rgb(4 15 25) 0%,
+      rgb(8 28 43) 46%,
+      rgb(10 44 58) 100%
+    );
   --app-overlay:
     linear-gradient(180deg, rgb(255 255 255 / 0.04), transparent 42%),
     radial-gradient(circle at 100% 0%, rgb(45 212 191 / 0.08), transparent 28%);
   --app-pattern:
     linear-gradient(rgb(125 211 252 / 0.1) 1px, transparent 1px),
     linear-gradient(90deg, rgb(125 211 252 / 0.1) 1px, transparent 1px),
-    linear-gradient(135deg, transparent 0 47%, rgb(251 146 60 / 0.08) 47% 50%, transparent 50% 100%);
+    linear-gradient(
+      135deg,
+      transparent 0 47%,
+      rgb(251 146 60 / 0.08) 47% 50%,
+      transparent 50% 100%
+    );
   --app-pattern-size: 48px 48px, 48px 48px, 240px 240px;
   --app-pattern-opacity: 0.42;
 }
@@ -223,22 +274,34 @@
     radial-gradient(circle at 10% 16%, rgb(45 212 191 / 0.14), transparent 20%),
     radial-gradient(circle at 90% 12%, rgb(251 146 60 / 0.08), transparent 16%),
     radial-gradient(circle at 76% 100%, rgb(14 165 233 / 0.1), transparent 28%),
-    linear-gradient(165deg, rgb(243 250 251) 0%, rgb(231 243 246) 46%, rgb(213 229 235) 100%);
+    linear-gradient(
+      165deg,
+      rgb(243 250 251) 0%,
+      rgb(231 243 246) 46%,
+      rgb(213 229 235) 100%
+    );
   --app-overlay:
     linear-gradient(180deg, rgb(255 255 255 / 0.52), transparent 40%),
     radial-gradient(circle at 100% 0%, rgb(20 184 166 / 0.08), transparent 28%);
   --app-pattern:
     linear-gradient(rgb(125 211 252 / 0.12) 1px, transparent 1px),
     linear-gradient(90deg, rgb(125 211 252 / 0.12) 1px, transparent 1px),
-    linear-gradient(135deg, transparent 0 47%, rgb(251 146 60 / 0.06) 47% 50%, transparent 50% 100%);
+    linear-gradient(
+      135deg,
+      transparent 0 47%,
+      rgb(251 146 60 / 0.06) 47% 50%,
+      transparent 50% 100%
+    );
   --app-pattern-size: 52px 52px, 52px 52px, 240px 240px;
   --app-pattern-opacity: 0.34;
 }
 
 :root[data-theme-family="terminal"][data-theme-mode="dark"] {
   color-scheme: dark;
-  --font-sans: Consolas, "Lucida Console", "Cascadia Mono", "Courier New", monospace;
-  --font-mono: Consolas, "Lucida Console", "Cascadia Mono", "Courier New", monospace;
+  --font-sans:
+    Consolas, "Lucida Console", "Cascadia Mono", "Courier New", monospace;
+  --font-mono:
+    Consolas, "Lucida Console", "Cascadia Mono", "Courier New", monospace;
   --color-ink: 3 7 4;
   --color-panel: 7 18 10;
   --color-panel-soft: 12 28 16;
@@ -255,14 +318,22 @@
   --shadow-color: 1 6 2;
   --app-background:
     radial-gradient(circle at 18% 12%, rgb(74 222 128 / 0.12), transparent 18%),
-    radial-gradient(circle at 82% 10%, rgb(190 242 100 / 0.08), transparent 16%),
+    radial-gradient(
+      circle at 82% 10%,
+      rgb(190 242 100 / 0.08),
+      transparent 16%
+    ),
     radial-gradient(circle at 50% 100%, rgb(22 163 74 / 0.16), transparent 30%),
     linear-gradient(180deg, rgb(1 6 2) 0%, rgb(4 12 7) 48%, rgb(8 20 12) 100%);
   --app-overlay:
     linear-gradient(180deg, rgb(255 255 255 / 0.03), transparent 42%),
     radial-gradient(circle at 50% 0%, rgb(74 222 128 / 0.07), transparent 24%);
   --app-pattern:
-    repeating-linear-gradient(180deg, rgb(74 222 128 / 0.08) 0 2px, transparent 2px 4px),
+    repeating-linear-gradient(
+      180deg,
+      rgb(74 222 128 / 0.08) 0 2px,
+      transparent 2px 4px
+    ),
     linear-gradient(90deg, rgb(74 222 128 / 0.06) 1px, transparent 1px);
   --app-pattern-size: 100% 4px, 36px 36px;
   --app-pattern-opacity: 0.54;
@@ -270,8 +341,10 @@
 
 :root[data-theme-family="terminal"][data-theme-mode="light"] {
   color-scheme: light;
-  --font-sans: Consolas, "Lucida Console", "Cascadia Mono", "Courier New", monospace;
-  --font-mono: Consolas, "Lucida Console", "Cascadia Mono", "Courier New", monospace;
+  --font-sans:
+    Consolas, "Lucida Console", "Cascadia Mono", "Courier New", monospace;
+  --font-mono:
+    Consolas, "Lucida Console", "Cascadia Mono", "Courier New", monospace;
   --color-ink: 240 247 236;
   --color-panel: 248 255 246;
   --color-panel-soft: 232 244 228;
@@ -288,14 +361,27 @@
   --shadow-color: 154 181 149;
   --app-background:
     radial-gradient(circle at 18% 12%, rgb(74 222 128 / 0.12), transparent 18%),
-    radial-gradient(circle at 82% 10%, rgb(190 242 100 / 0.08), transparent 16%),
+    radial-gradient(
+      circle at 82% 10%,
+      rgb(190 242 100 / 0.08),
+      transparent 16%
+    ),
     radial-gradient(circle at 50% 100%, rgb(34 197 94 / 0.1), transparent 28%),
-    linear-gradient(180deg, rgb(245 251 242) 0%, rgb(234 244 229) 48%, rgb(220 235 213) 100%);
+    linear-gradient(
+      180deg,
+      rgb(245 251 242) 0%,
+      rgb(234 244 229) 48%,
+      rgb(220 235 213) 100%
+    );
   --app-overlay:
     linear-gradient(180deg, rgb(255 255 255 / 0.58), transparent 40%),
     radial-gradient(circle at 50% 0%, rgb(74 222 128 / 0.06), transparent 24%);
   --app-pattern:
-    repeating-linear-gradient(180deg, rgb(22 163 74 / 0.05) 0 2px, transparent 2px 4px),
+    repeating-linear-gradient(
+      180deg,
+      rgb(22 163 74 / 0.05) 0 2px,
+      transparent 2px 4px
+    ),
     linear-gradient(90deg, rgb(22 163 74 / 0.06) 1px, transparent 1px);
   --app-pattern-size: 100% 4px, 36px 36px;
   --app-pattern-opacity: 0.38;
@@ -320,7 +406,9 @@ body {
   font-family: var(--font-sans);
   background: var(--app-background);
   color: rgb(var(--color-text-strong));
-  transition: background 220ms ease, color 180ms ease;
+  transition:
+    background 220ms ease,
+    color 180ms ease;
   overflow: hidden;
   isolation: isolate;
 }
@@ -332,7 +420,10 @@ body::after {
   inset: 0;
   pointer-events: none;
   z-index: 0;
-  transition: opacity 220ms ease, background 220ms ease, background-image 220ms ease;
+  transition:
+    opacity 220ms ease,
+    background 220ms ease,
+    background-image 220ms ease;
 }
 
 body::before {
@@ -468,8 +559,11 @@ input[type="checkbox"]:disabled {
 .surface-panel {
   border: 1px solid rgb(var(--color-line) / 0.14);
   border-radius: var(--radius-lg);
-  background:
-    linear-gradient(180deg, rgb(var(--color-panel) / 0.96), rgb(var(--color-panel) / 0.92));
+  background: linear-gradient(
+    180deg,
+    rgb(var(--color-panel) / 0.96),
+    rgb(var(--color-panel) / 0.92)
+  );
   box-shadow:
     inset 0 1px 0 rgb(255 255 255 / 0.05),
     0 20px 40px -34px rgb(var(--shadow-color) / 0.96);
@@ -479,8 +573,11 @@ input[type="checkbox"]:disabled {
 .surface-panel-soft {
   border: 1px solid rgb(var(--color-line) / 0.12);
   border-radius: calc(var(--radius-lg) - 4px);
-  background:
-    linear-gradient(180deg, rgb(var(--color-panel-soft) / 0.94), rgb(var(--color-panel-soft) / 0.88));
+  background: linear-gradient(
+    180deg,
+    rgb(var(--color-panel-soft) / 0.94),
+    rgb(var(--color-panel-soft) / 0.88)
+  );
   box-shadow:
     inset 0 1px 0 rgb(255 255 255 / 0.04),
     0 16px 34px -30px rgb(var(--shadow-color) / 0.94);
@@ -523,8 +620,16 @@ input[type="checkbox"]:disabled {
   overflow: hidden;
   pointer-events: none;
   background:
-    radial-gradient(circle at top, rgb(var(--color-accent) / 0.06), transparent 34%),
-    linear-gradient(180deg, rgb(var(--color-ink) / 0.08), rgb(var(--color-ink) / 0.34));
+    radial-gradient(
+      circle at top,
+      rgb(var(--color-accent) / 0.06),
+      transparent 34%
+    ),
+    linear-gradient(
+      180deg,
+      rgb(var(--color-ink) / 0.08),
+      rgb(var(--color-ink) / 0.34)
+    );
 }
 
 .console-matrix-column {

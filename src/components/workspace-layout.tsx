@@ -612,57 +612,6 @@ export function WorkspaceLayout({
 
   return (
     <div ref={workspaceRef} className="surface-panel-soft flex h-full min-h-0 flex-1 flex-col overflow-hidden">
-      <div className="surface-divider flex shrink-0 items-center justify-between gap-2 bg-panel/80 px-2 py-1.5">
-        <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1">
-          {PANEL_IDS.map((panelId) => {
-            const zoneId = findPanelZone(panelId);
-            const isActive = zoneId ? layout.active[zoneId] === panelId : false;
-
-            return (
-              <button
-                key={panelId}
-                type="button"
-                onPointerDown={(event) => startPanelDrag(panelId, event)}
-                className={[
-                  "inline-flex cursor-grab items-center gap-1 border px-2 py-1 text-[9px] font-semibold uppercase tracking-[0.12em] transition active:cursor-grabbing",
-                  isActive
-                    ? "border-accent/40 bg-accent/10 text-accent"
-                    : "border-line bg-panelSoft/70 text-textMuted hover:bg-panelSoft",
-                  dragPanelId === panelId ? "opacity-70" : "",
-                ].join(" ")}
-                onClick={() => focusPanel(panelId)}
-                title={zoneId
-                  ? `Mostrar ${panelLabels[panelId]} y arrastrarlo desde ${zoneLabels[zoneId].toLowerCase()}`
-                  : `Mostrar ${panelLabels[panelId]} y arrastrarlo a una zona`}
-              >
-                <GripVertical className="h-2.5 w-2.5" />
-                {panelLabels[panelId]}
-              </button>
-            );
-          })}
-        </div>
-        <div className="flex shrink-0 items-center gap-1">
-          <button
-            type="button"
-            className="inline-flex items-center gap-1 border border-line bg-panelSoft/70 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-[0.12em] text-textMuted transition hover:bg-panelSoft"
-            onClick={showConsole}
-            title="Traer la consola a la zona inferior"
-          >
-            <TerminalSquare className="h-3 w-3" />
-            Consola abajo
-          </button>
-          <button
-            type="button"
-            className="inline-flex items-center gap-1 border border-line bg-panelSoft/70 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-[0.12em] text-textMuted transition hover:bg-panelSoft"
-            onClick={resetLayout}
-            title="Restablecer la distribucion por defecto"
-          >
-            <RotateCcw className="h-3 w-3" />
-            Reset
-          </button>
-        </div>
-      </div>
-
       <div className="flex min-h-0 flex-1 flex-col overflow-hidden p-1">
         <div ref={topRowRef} className="flex min-h-0 flex-1 overflow-hidden gap-1">
           {hasLeftZone ? (

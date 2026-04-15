@@ -341,17 +341,17 @@ export function ProjectList({
       </div>
 
       <div className="min-h-0 flex-1 overflow-auto scrollbar-thin px-2 pb-2">
-        <table className="ui-data-table min-w-full border-separate border-spacing-y-1 text-[11px]">
+        <table className="ui-data-table min-w-full border-separate border-spacing-y-0.5 text-[11px]">
           <thead className="sticky top-0 z-10 bg-panel/88 backdrop-blur-xl">
             <tr className="text-left text-[9px] uppercase tracking-[0.16em] text-textSoft shadow-[inset_0_-1px_0_rgb(var(--color-line)/0.14)]">
-              <th className="w-[44px] px-2 py-2">Run</th>
-              <th className="px-2 py-2">Servicio</th>
-              <th className="w-[58px] px-2 py-2">Port</th>
-              <th className="w-[72px] px-2 py-2">Mocks</th>
-              <th className="w-[48px] px-2 py-2">Ord</th>
-              <th className="w-[56px] px-2 py-2">Prev</th>
-              <th className="w-[88px] px-2 py-2">Estado</th>
-              <th className="w-[220px] px-2 py-2">Acc.</th>
+              <th className="w-[44px] px-2 ">Run</th>
+              <th className="px-2 ">Servicio</th>
+              <th className="w-[58px] px-2 ">Port</th>
+              <th className="w-[72px] px-2 ">Mocks</th>
+              <th className="w-[48px] px-2 ">Ord</th>
+              <th className="w-[56px] px-2 ">Prev</th>
+              <th className="w-[88px] px-2 ">Estado</th>
+              <th className="w-[210px] px-2 ">Acc.</th>
             </tr>
           </thead>
           <tbody>
@@ -389,7 +389,7 @@ export function ProjectList({
                       })}
                       onClick={() => onSelect(project.id)}
                     >
-                      <td className="px-2 py-2.5 align-middle">
+                      <td className="px-2  align-middle">
                         <Checkbox
                           checked={project.enabled}
                           onChange={(event) => {
@@ -400,11 +400,11 @@ export function ProjectList({
                           title="Incluir en Iniciar habilitados"
                         />
                       </td>
-                      <td className="px-2 py-2.5 align-middle">
-                        <div className="flex min-w-0 items-center gap-1.5">
+                      <td className="px-2  align-middle">
+                        <div className="flex min-w-0 items-center gap-1">
                           <button
                             type="button"
-                            className="surface-chip cursor-grab p-1 text-textMuted transition hover:bg-panelSoft/70 active:cursor-grabbing"
+                            className="surface-chip cursor-grab p-0.5 text-textMuted transition hover:bg-panelSoft/70 active:cursor-grabbing"
                             onPointerDown={(event) => {
                               event.preventDefault();
                               event.stopPropagation();
@@ -417,7 +417,7 @@ export function ProjectList({
                           </button>
                           <button
                             type="button"
-                            className="surface-chip p-1 text-textMuted transition hover:bg-panelSoft/70"
+                            className="surface-chip p-0.5 text-textMuted transition hover:bg-panelSoft/70"
                             onClick={(event) => {
                               event.stopPropagation();
                               toggleExpanded(project.id);
@@ -427,10 +427,10 @@ export function ProjectList({
                             {isExpanded ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
                           </button>
                           <div className="min-w-0">
-                            <div className="flex min-w-0 items-center gap-1.5">
-                              <span className={["h-5 w-1.5 shrink-0 rounded-full", markerToneByStatus[project.status]].join(" ")} />
+                            <div className="flex min-w-0 items-center gap-1">
+                              <span className={["h-4 w-1.5 shrink-0 rounded-full", markerToneByStatus[project.status]].join(" ")} />
                               <p className="truncate text-[11px] font-semibold leading-4 text-textStrong">{project.name}</p>
-                              <Badge variant="secondary" className="shrink-0 px-1.5 py-0.5 text-[9px]">
+                              <Badge variant="secondary" className="shrink-0 px-1.5 py-0 text-[8px]">
                                 {launchModeLabel[project.launchMode]}
                               </Badge>
                               {hasConflict ? <TriangleAlert className="h-3.5 w-3.5 shrink-0 text-warn" /> : null}
@@ -440,14 +440,14 @@ export function ProjectList({
                           </div>
                         </div>
                       </td>
-                      <td className="px-2 py-2.5 align-middle text-[11px] leading-4 text-textStrong">{project.port ?? "n/a"}</td>
-                      <td className="px-2 py-2.5 align-middle">
-                        <Badge variant={project.mockSummary.totalCount ? "info" : "secondary"} className="min-w-[44px] justify-center px-1.5 py-0.5 text-[10px]">
+                      <td className="px-2  align-middle text-[11px] leading-4 text-textStrong">{project.port ?? "n/a"}</td>
+                      <td className="px-2  align-middle">
+                        <Badge variant={project.mockSummary.totalCount ? "info" : "secondary"} className="min-w-[40px] justify-center px-1.5 py-0 text-[9px]">
                           {project.mockSummary.totalCount}
                         </Badge>
                       </td>
-                      <td className="px-2 py-2.5 align-middle text-[11px] leading-4 text-textStrong">{project.catalogOrder}</td>
-                      <td className="px-2 py-2.5 align-middle">
+                      <td className="px-2  align-middle text-[11px] leading-4 text-textStrong">{project.catalogOrder}</td>
+                      <td className="px-2  align-middle">
                         <Checkbox
                           checked={project.waitForPreviousReady}
                           onChange={(event) => {
@@ -458,15 +458,16 @@ export function ProjectList({
                           title="Esperar a que el servicio anterior quede ready antes de iniciar este"
                         />
                       </td>
-                      <td className="px-2 py-2.5 align-middle">
+                      <td className="px-2  align-middle">
                         <StatusPill status={project.status} />
                       </td>
-                      <td className="px-2 py-2.5 align-middle">
+                      <td className="px-2  align-middle">
                         <div className="flex flex-wrap gap-1">
                           <Button
                             type="button"
                             variant="success"
                             size="sm"
+                            className="!h-7 !min-h-7 !w-7 !min-w-7 !gap-0 !px-0 !py-0"
                             onClick={(event) => {
                               event.stopPropagation();
                               onStartProject(project.id);
@@ -479,6 +480,7 @@ export function ProjectList({
                             type="button"
                             variant="secondary"
                             size="sm"
+                            className="!h-7 !min-h-7 !w-7 !min-w-7 !gap-0 !px-0 !py-0"
                             onClick={(event) => {
                               event.stopPropagation();
                               onStopProject(project.id);
@@ -492,6 +494,7 @@ export function ProjectList({
                               type="button"
                               variant="warning"
                               size="sm"
+                              className="!h-7 !min-h-7 !gap-1 !px-2 !py-0 text-[10px]"
                               onClick={(event) => {
                                 event.stopPropagation();
                                 onForceStartProject(project.id);
@@ -506,6 +509,7 @@ export function ProjectList({
                               type="button"
                               variant="destructive"
                               size="sm"
+                              className="!h-7 !min-h-7 !gap-1 !px-2 !py-0 text-[10px]"
                               onClick={(event) => {
                                 event.stopPropagation();
                                 onForceStopProject(project.id);
@@ -519,7 +523,7 @@ export function ProjectList({
                             type="button"
                             variant="ghost"
                             size="sm"
-                            className="text-danger"
+                            className="!h-7 !min-h-7 !w-7 !min-w-7 !gap-0 !px-0 !py-0 text-danger"
                             onClick={(event) => {
                               event.stopPropagation();
                               onDeleteProject(project.id);
@@ -534,8 +538,8 @@ export function ProjectList({
 
                     {isExpanded ? (
                       <tr className={project.enabled ? "" : "opacity-60"}>
-                        <td colSpan={8} className="px-2 pb-1.5 pt-0.5">
-                          <div className="surface-panel-soft grid gap-1.5 px-2 py-1.5 text-[10px] leading-4 text-textMuted md:grid-cols-[minmax(0,1.9fr)_minmax(0,1.15fr)_minmax(0,1fr)]">
+                        <td colSpan={8} className="px-2 pb-1 pt-0">
+                          <div className="surface-panel-soft grid gap-1 px-2 py-1 text-[10px] leading-4 text-textMuted md:grid-cols-[minmax(0,1.9fr)_minmax(0,1.15fr)_minmax(0,1fr)]">
                             <div className="min-w-0">
                               <p className="text-[9px] uppercase tracking-[0.14em] text-textSoft">Ruta</p>
                               <p className="truncate text-textMuted" title={project.rootPath}>

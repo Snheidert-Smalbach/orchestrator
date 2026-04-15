@@ -43,8 +43,11 @@
 }
 
 .ui-button--default {
-  --ui-button-bg:
-    linear-gradient(135deg, rgb(var(--color-accent) / 0.18), rgb(var(--color-accent) / 0.08));
+  --ui-button-bg: linear-gradient(
+    135deg,
+    rgb(var(--color-accent) / 0.18),
+    rgb(var(--color-accent) / 0.08)
+  );
   --ui-button-border: rgb(var(--color-accent) / 0.24);
   --ui-button-color: rgb(var(--color-accent));
 }
@@ -69,22 +72,31 @@
 }
 
 .ui-button--destructive {
-  --ui-button-bg:
-    linear-gradient(135deg, rgb(var(--color-danger) / 0.18), rgb(var(--color-danger) / 0.08));
+  --ui-button-bg: linear-gradient(
+    135deg,
+    rgb(var(--color-danger) / 0.18),
+    rgb(var(--color-danger) / 0.08)
+  );
   --ui-button-border: rgb(var(--color-danger) / 0.28);
   --ui-button-color: rgb(var(--color-danger));
 }
 
 .ui-button--warning {
-  --ui-button-bg:
-    linear-gradient(135deg, rgb(var(--color-warn) / 0.18), rgb(var(--color-warn) / 0.08));
+  --ui-button-bg: linear-gradient(
+    135deg,
+    rgb(var(--color-warn) / 0.18),
+    rgb(var(--color-warn) / 0.08)
+  );
   --ui-button-border: rgb(var(--color-warn) / 0.28);
   --ui-button-color: rgb(var(--color-warn));
 }
 
 .ui-button--success {
-  --ui-button-bg:
-    linear-gradient(135deg, rgb(var(--color-ok) / 0.18), rgb(var(--color-ok) / 0.08));
+  --ui-button-bg: linear-gradient(
+    135deg,
+    rgb(var(--color-ok) / 0.18),
+    rgb(var(--color-ok) / 0.08)
+  );
   --ui-button-border: rgb(var(--color-ok) / 0.28);
   --ui-button-color: rgb(var(--color-ok));
 }
@@ -142,33 +154,48 @@
 .ui-card {
   border: 1px solid rgb(var(--color-line) / 0.16);
   border-radius: var(--radius-lg);
-  background:
-    linear-gradient(180deg, rgb(var(--color-panel) / 0.96), rgb(var(--color-panel) / 0.9));
+  background: linear-gradient(
+    180deg,
+    rgb(var(--color-panel) / 0.96),
+    rgb(var(--color-panel) / 0.9)
+  );
   box-shadow:
     inset 0 1px 0 rgb(255 255 255 / 0.05),
     0 24px 42px -34px rgb(var(--shadow-color) / 0.94);
 }
 
 .ui-card--muted {
-  background:
-    linear-gradient(180deg, rgb(var(--color-panel-soft) / 0.94), rgb(var(--color-panel-soft) / 0.88));
+  background: linear-gradient(
+    180deg,
+    rgb(var(--color-panel-soft) / 0.94),
+    rgb(var(--color-panel-soft) / 0.88)
+  );
 }
 
 .ui-card--accent {
-  background:
-    linear-gradient(135deg, rgb(var(--color-accent) / 0.12), rgb(var(--color-panel) / 0.92));
+  background: linear-gradient(
+    135deg,
+    rgb(var(--color-accent) / 0.12),
+    rgb(var(--color-panel) / 0.92)
+  );
   border-color: rgb(var(--color-accent) / 0.18);
 }
 
 .ui-card--danger {
-  background:
-    linear-gradient(135deg, rgb(var(--color-danger) / 0.12), rgb(var(--color-panel) / 0.92));
+  background: linear-gradient(
+    135deg,
+    rgb(var(--color-danger) / 0.12),
+    rgb(var(--color-panel) / 0.92)
+  );
   border-color: rgb(var(--color-danger) / 0.18);
 }
 
 .ui-card--warning {
-  background:
-    linear-gradient(135deg, rgb(var(--color-warn) / 0.12), rgb(var(--color-panel) / 0.92));
+  background: linear-gradient(
+    135deg,
+    rgb(var(--color-warn) / 0.12),
+    rgb(var(--color-panel) / 0.92)
+  );
   border-color: rgb(var(--color-warn) / 0.18);
 }
 
@@ -210,8 +237,11 @@
   width: 100%;
   border: 1px solid rgb(var(--color-line) / 0.26);
   border-radius: var(--radius-md);
-  background:
-    linear-gradient(180deg, rgb(var(--color-panel-soft) / 0.95), rgb(var(--color-panel-soft) / 0.88));
+  background: linear-gradient(
+    180deg,
+    rgb(var(--color-panel-soft) / 0.95),
+    rgb(var(--color-panel-soft) / 0.88)
+  );
   color: rgb(var(--color-text-strong));
   box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.06);
 }
@@ -339,8 +369,11 @@
   overflow: hidden;
   border: 1px solid rgb(var(--color-line) / 0.16);
   border-radius: var(--radius-lg);
-  background:
-    linear-gradient(180deg, rgb(var(--color-panel) / 0.96), rgb(var(--color-panel) / 0.92));
+  background: linear-gradient(
+    180deg,
+    rgb(var(--color-panel) / 0.96),
+    rgb(var(--color-panel) / 0.92)
+  );
   box-shadow:
     inset 0 1px 0 rgb(255 255 255 / 0.05),
     0 30px 60px -38px rgb(var(--shadow-color) / 0.94);
@@ -419,8 +452,11 @@
   padding: 0.95rem;
   border: 1px solid rgb(var(--color-line) / 0.14);
   border-radius: calc(var(--radius-lg) - 4px);
-  background:
-    linear-gradient(180deg, rgb(var(--color-panel-soft) / 0.92), rgb(var(--color-panel) / 0.94));
+  background: linear-gradient(
+    180deg,
+    rgb(var(--color-panel-soft) / 0.92),
+    rgb(var(--color-panel) / 0.94)
+  );
   box-shadow:
     inset 0 1px 0 rgb(255 255 255 / 0.05),
     0 18px 36px -30px rgb(var(--shadow-color) / 0.9);
@@ -497,8 +533,11 @@
   padding: 0.8rem 0.95rem;
   border: 1px solid rgb(var(--color-line) / 0.16);
   border-radius: var(--radius-md);
-  background:
-    linear-gradient(180deg, rgb(var(--color-panel-soft) / 0.88), rgb(var(--color-panel-soft) / 0.8));
+  background: linear-gradient(
+    180deg,
+    rgb(var(--color-panel-soft) / 0.88),
+    rgb(var(--color-panel-soft) / 0.8)
+  );
 }
 
 .ui-inline-option--block {
@@ -554,22 +593,31 @@
 }
 
 .ui-alert-card--info {
-  background:
-    linear-gradient(135deg, rgb(var(--color-accent) / 0.12), rgb(var(--color-panel) / 0.92));
+  background: linear-gradient(
+    135deg,
+    rgb(var(--color-accent) / 0.12),
+    rgb(var(--color-panel) / 0.92)
+  );
   border-color: rgb(var(--color-accent) / 0.22);
   color: rgb(var(--color-accent));
 }
 
 .ui-alert-card--warning {
-  background:
-    linear-gradient(135deg, rgb(var(--color-warn) / 0.12), rgb(var(--color-panel) / 0.92));
+  background: linear-gradient(
+    135deg,
+    rgb(var(--color-warn) / 0.12),
+    rgb(var(--color-panel) / 0.92)
+  );
   border-color: rgb(var(--color-warn) / 0.22);
   color: rgb(var(--color-warn));
 }
 
 .ui-alert-card--danger {
-  background:
-    linear-gradient(135deg, rgb(var(--color-danger) / 0.12), rgb(var(--color-panel) / 0.92));
+  background: linear-gradient(
+    135deg,
+    rgb(var(--color-danger) / 0.12),
+    rgb(var(--color-panel) / 0.92)
+  );
   border-color: rgb(var(--color-danger) / 0.22);
   color: rgb(var(--color-danger));
 }
@@ -588,36 +636,51 @@
 }
 
 .ui-bulk-action-card--default {
-  background:
-    linear-gradient(135deg, rgb(var(--color-accent) / 0.1), rgb(var(--color-panel) / 0.92));
+  background: linear-gradient(
+    135deg,
+    rgb(var(--color-accent) / 0.1),
+    rgb(var(--color-panel) / 0.92)
+  );
   border-color: rgb(var(--color-accent) / 0.22);
   color: rgb(var(--color-accent));
 }
 
 .ui-bulk-action-card--success {
-  background:
-    linear-gradient(135deg, rgb(var(--color-ok) / 0.1), rgb(var(--color-panel) / 0.92));
+  background: linear-gradient(
+    135deg,
+    rgb(var(--color-ok) / 0.1),
+    rgb(var(--color-panel) / 0.92)
+  );
   border-color: rgb(var(--color-ok) / 0.22);
   color: rgb(var(--color-ok));
 }
 
 .ui-bulk-action-card--warning {
-  background:
-    linear-gradient(135deg, rgb(var(--color-warn) / 0.1), rgb(var(--color-panel) / 0.92));
+  background: linear-gradient(
+    135deg,
+    rgb(var(--color-warn) / 0.1),
+    rgb(var(--color-panel) / 0.92)
+  );
   border-color: rgb(var(--color-warn) / 0.22);
   color: rgb(var(--color-warn));
 }
 
 .ui-bulk-action-card--secondary {
-  background:
-    linear-gradient(135deg, rgb(var(--color-panel-soft) / 0.86), rgb(var(--color-panel) / 0.92));
+  background: linear-gradient(
+    135deg,
+    rgb(var(--color-panel-soft) / 0.86),
+    rgb(var(--color-panel) / 0.92)
+  );
   border-color: rgb(var(--color-line) / 0.2);
   color: rgb(var(--color-text-strong));
 }
 
 .ui-bulk-action-card--destructive {
-  background:
-    linear-gradient(135deg, rgb(var(--color-danger) / 0.1), rgb(var(--color-panel) / 0.92));
+  background: linear-gradient(
+    135deg,
+    rgb(var(--color-danger) / 0.1),
+    rgb(var(--color-panel) / 0.92)
+  );
   border-color: rgb(var(--color-danger) / 0.22);
   color: rgb(var(--color-danger));
 }

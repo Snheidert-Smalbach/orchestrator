@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Play, RefreshCw, Rocket, Save, Square, Trash2, TriangleAlert } from "lucide-react";
+import { Folder, Info, Play, RefreshCw, Rocket, Save, Square, Trash2, TriangleAlert, type LucideIcon } from "lucide-react";
 import { inspectProject } from "../lib/tauri";
 import type { DetectedProject, Preset, Project, ProjectEnvOverride, ProjectResourceUsage } from "../lib/types";
 import { ProjectMocksEditor } from "./project-mocks-editor";
@@ -130,6 +130,45 @@ function mergeProjectWithMetadata(
           : null
         : project.readinessValue,
   } satisfies Project;
+}
+
+type DetailMetaChipTone = "default" | "info" | "warn" | "danger";
+
+const detailMetaChipToneClassName: Record<DetailMetaChipTone, string> = {
+  default: "text-textMuted",
+  info: "!border-info/24 !bg-info/10 !text-info",
+  warn: "!border-warn/24 !bg-warn/12 !text-warn",
+  danger: "!border-danger/24 !bg-danger/12 !text-danger",
+};
+
+function DetailMetaChip({
+  icon: Icon,
+  label,
+  title,
+  tone = "default",
+  className = "",
+  spin = false,
+}: {
+  icon: LucideIcon;
+  label: string;
+  title?: string;
+  tone?: DetailMetaChipTone;
+  className?: string;
+  spin?: boolean;
+}) {
+  return (
+    <span
+      title={title ?? label}
+      className={[
+        "surface-chip inline-flex min-w-0 items-center gap-1.5 px-2 py-1 text-[10px] font-medium leading-none",
+        detailMetaChipToneClassName[tone],
+        className,
+      ].join(" ")}
+    >
+      <Icon className={["h-3 w-3 shrink-0", spin ? "animate-spin" : ""].join(" ")} />
+      <span className="truncate">{label}</span>
+    </span>
+  );
 }
 
 export function ProjectDetail({
@@ -358,70 +397,84 @@ export function ProjectDetail({
       onValueChange={(value) => setActiveTab(value as DetailTabId)}
       className="surface-panel flex h-full min-h-0 flex-col overflow-hidden"
     >
-      <div className="surface-divider flex flex-wrap items-start justify-between gap-3 px-4 py-3">
-        <div className="min-w-0 flex-1">
-          <div className="flex flex-wrap items-center gap-2">
-            <p className="text-[10px] uppercase tracking-[0.24em] text-textSoft">Detalle</p>
-            <StatusPill status={draft.status} />
-            <Badge variant="secondary">{draft.runtimeKind}</Badge>
+      <div className="surface-divider px-4 py-2.5">
+        <div className="flex flex-wrap items-start justify-between gap-2.5">
+          <div className="min-w-0 flex-1">
+            <div className="flex flex-wrap items-center gap-2">
+              <p className="text-[10px] uppercase tracking-[0.24em] text-textSoft">Detalle</p>
+              <StatusPill status={draft.status} />
+              <Badge variant="secondary">{draft.runtimeKind}</Badge>
+            </div>
+            <h2 className="mt-1 truncate text-[15px] font-semibold text-textStrong">{draft.name}</h2>
+            <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+              <DetailMetaChip icon={Folder} label={draft.rootPath} className="max-w-full sm:max-w-[28rem]" />
+              <DetailMetaChip
+                icon={Info}
+                label={`${draft.availableScripts.length} scripts / ${draft.availableEnvFiles.length} env`}
+                title={`${draft.availableScripts.length} scripts disponibles y ${draft.availableEnvFiles.length} archivos .env detectados`}
+              />
+              {runtimeMessage ? (
+                <DetailMetaChip icon={Info} tone="info" label={runtimeMessage} className="max-w-full sm:max-w-[22rem]" />
+              ) : null}
+              {canForceStart ? (
+                <DetailMetaChip
+                  icon={Rocket}
+                  tone="warn"
+                  label="Puerto ocupado"
+                  title="El puerto configurado parece ocupado. Puedes usar Forzar e iniciar para liberar ese puerto y arrancar el servicio."
+                />
+              ) : null}
+              {showForceStopWarning ? (
+                <DetailMetaChip
+                  icon={TriangleAlert}
+                  tone="danger"
+                  label="Forzar sugerido"
+                  title="La detencion normal no libero el servicio. Puedes usar Forzar para matar el PID o liberar el puerto."
+                />
+              ) : null}
+              {metadataError ? <DetailMetaChip icon={TriangleAlert} tone="danger" label="Error de metadata" title={metadataError} /> : null}
+              {saveState === "error" ? <DetailMetaChip icon={Save} tone="danger" label="Error al guardar" title={saveHint} /> : null}
+              {isRefreshing ? (
+                <DetailMetaChip icon={RefreshCw} tone="info" label="Leyendo metadata" spin title="Leyendo metadata del proyecto..." />
+              ) : null}
+            </div>
           </div>
-          <h2 className="mt-1 truncate text-base font-semibold text-textStrong">{draft.name}</h2>
-          <p className="mt-0.5 truncate text-[11px] text-textMuted">{draft.rootPath}</p>
-          <p className="mt-1 text-[11px] text-textSoft">
-            {draft.availableScripts.length} scripts / {draft.availableEnvFiles.length} archivos .env
-          </p>
-          {runtimeMessage ? <p className="mt-1 text-[11px] text-info">{runtimeMessage}</p> : null}
-          {canForceStart ? (
-            <p className="mt-1 inline-flex items-center gap-1.5 text-[11px] text-warn">
-              <Rocket className="h-3 w-3" />
-              El puerto configurado parece ocupado. Puedes usar Forzar e iniciar para liberar ese puerto y arrancar el servicio.
-            </p>
-          ) : null}
-          {showForceStopWarning ? (
-            <p className="mt-1 inline-flex items-center gap-1.5 text-[11px] text-danger">
-              <TriangleAlert className="h-3 w-3" />
-              La detención normal no liberó el servicio. Puedes usar Forzar para matar el PID o liberar el puerto.
-            </p>
-          ) : null}
-          {metadataError ? <p className="mt-1 text-[11px] text-danger">{metadataError}</p> : null}
-          {saveState === "error" ? <p className="mt-1 text-[11px] text-danger">{saveHint}</p> : null}
-          {isRefreshing ? <p className="mt-1 text-[11px] text-textMuted">Leyendo metadata del proyecto...</p> : null}
-        </div>
-        <div className="flex flex-wrap items-center gap-1.5">
-          <Button
-            type="button"
-            variant="secondary"
-            size="sm"
-            onClick={() => void refreshMetadata(draft, { preferredEnvFile: draft.selectedEnvFile, preferDetectedPort: true })}
-            disabled={isRefreshing}
-          >
-            <RefreshCw className={["h-3.5 w-3.5", isRefreshing ? "animate-spin" : ""].join(" ")} />
-            Recargar
-          </Button>
-          <Button type="button" variant="success" size="sm" onClick={() => void handleStart()}>
-            <Play className="h-3.5 w-3.5" />
-            Iniciar
-          </Button>
-          <Button type="button" variant="secondary" size="sm" onClick={() => void onStop(draft.id)}>
-            <Square className="h-3.5 w-3.5" />
-            Detener
-          </Button>
-          {canForceStart ? (
-            <Button type="button" variant="warning" size="sm" onClick={() => void onForceStart(draft.id)}>
-              <Rocket className="h-3.5 w-3.5" />
-              Forzar e iniciar
+          <div className="flex shrink-0 flex-wrap items-center gap-1.5">
+            <Button
+              type="button"
+              variant="secondary"
+              size="sm"
+              onClick={() => void refreshMetadata(draft, { preferredEnvFile: draft.selectedEnvFile, preferDetectedPort: true })}
+              disabled={isRefreshing}
+            >
+              <RefreshCw className={["h-3.5 w-3.5", isRefreshing ? "animate-spin" : ""].join(" ")} />
+              Recargar
             </Button>
-          ) : null}
-          {!canForceStart && showForceStopAction ? (
-            <Button type="button" variant="destructive" size="sm" onClick={() => void onForceStop(draft.id)}>
-              <TriangleAlert className="h-3.5 w-3.5" />
-              Forzar
+            <Button type="button" variant="success" size="sm" onClick={() => void handleStart()}>
+              <Play className="h-3.5 w-3.5" />
+              Iniciar
             </Button>
-          ) : null}
+            <Button type="button" variant="secondary" size="sm" onClick={() => void onStop(draft.id)}>
+              <Square className="h-3.5 w-3.5" />
+              Detener
+            </Button>
+            {canForceStart ? (
+              <Button type="button" variant="warning" size="sm" onClick={() => void onForceStart(draft.id)}>
+                <Rocket className="h-3.5 w-3.5" />
+                Forzar e iniciar
+              </Button>
+            ) : null}
+            {!canForceStart && showForceStopAction ? (
+              <Button type="button" variant="destructive" size="sm" onClick={() => void onForceStop(draft.id)}>
+                <TriangleAlert className="h-3.5 w-3.5" />
+                Forzar
+              </Button>
+            ) : null}
+          </div>
         </div>
       </div>
 
-      <div className="surface-divider flex shrink-0 items-center gap-2 px-4 py-2">
+      <div className="surface-divider flex shrink-0 items-center gap-2 px-4 py-1.5">
         <TabsList>
           <TabsTrigger value="config">Configuración</TabsTrigger>
           <TabsTrigger value="mocks">
