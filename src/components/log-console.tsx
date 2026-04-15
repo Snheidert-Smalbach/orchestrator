@@ -10,7 +10,7 @@ interface LogConsoleProps {
   selectedProjectId: string | null;
 }
 
-const MATRIX_CHARSET = "ABCDEFGHIJKLMNÑOPQRSTUVWXYZÁÉÍÓÚÜ0123456789¿?¡!<>/=+-{}[]";
+const MATRIX_CHARSET = "ABCDEFGHIJKLMNÑOPQRSTUVWXYZ0123456789¿?¡!<>/=+-{}[]";
 
 function createMatrixColumn(index: number) {
   const length = 18 + (index % 10);

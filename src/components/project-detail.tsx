@@ -9,6 +9,8 @@ type SaveOptions = {
   quiet?: boolean;
 };
 
+type DetailTabId = "config" | "mocks";
+
 type Props = {
   project: Project | null;
   resourceUsage: ProjectResourceUsage | null;
@@ -140,6 +142,7 @@ export function ProjectDetail({
   onDelete,
 }: Props) {
   const [draft, setDraft] = useState<Project | null>(project);
+  const [activeTab, setActiveTab] = useState<DetailTabId>("config");
   const [overridesText, setOverridesText] = useState("");
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [metadataError, setMetadataError] = useState<string | null>(null);
@@ -153,6 +156,7 @@ export function ProjectDetail({
   useEffect(() => {
     if (!project) {
       setDraft(null);
+      setActiveTab("config");
       setOverridesText("");
       setMetadataError(null);
       setSaveError(null);
@@ -345,6 +349,14 @@ export function ProjectDetail({
     await onStart(projectDraft.id);
   }
 
+  const tabButtonClassName = (tabId: DetailTabId) =>
+    [
+      "inline-flex items-center gap-1.5 border px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.12em] transition",
+      activeTab === tabId
+        ? "border-accent/40 bg-accent/10 text-accent"
+        : "surface-chip text-textMuted hover:bg-panelSoft/72",
+    ].join(" ");
+
   return (
     <div className="surface-panel flex h-full min-h-0 flex-col overflow-hidden">
       <div className="surface-divider flex flex-wrap items-start justify-between gap-3 px-4 py-3">
@@ -394,6 +406,17 @@ export function ProjectDetail({
         </div>
       </div>
 
+      <div className="surface-divider flex shrink-0 items-center gap-1.5 px-4 py-2">
+        <button type="button" className={tabButtonClassName("config")} onClick={() => setActiveTab("config")}>
+          Configuracion
+        </button>
+        <button type="button" className={tabButtonClassName("mocks")} onClick={() => setActiveTab("mocks")}>
+          Mocks
+          <span className="surface-chip px-1.5 py-0.5 text-[9px] text-textStrong">{draft.mockSummary.totalCount}</span>
+        </button>
+      </div>
+
+      {activeTab === "config" ? (
       <div className="min-h-0 flex-1 overflow-auto"><div className="grid gap-3 p-4 [grid-template-columns:repeat(auto-fit,minmax(180px,1fr))]">
         <label className="space-y-1.5">
           <span className="text-[10px] uppercase tracking-[0.16em] text-textSoft">Nombre</span>
@@ -584,7 +607,6 @@ export function ProjectDetail({
               ? "record: publica un proxy grabador en el puerto del servicio, mueve el proceso real a un puerto interno y guarda request/response para futuros mocks."
               : "mock: levanta un mock HTTP liviano desde las capturas guardadas en el puerto configurado."}
         </div>
-        <ProjectMocksEditor project={draft} />
         <div className="space-y-2 [grid-column:1/-1]">
           <span className="text-[10px] uppercase tracking-[0.16em] text-textSoft">Proceso</span>
           <div className="surface-panel-soft grid gap-1.5 px-3 py-2 text-[12px] text-textStrong [grid-template-columns:repeat(auto-fit,minmax(140px,1fr))]">
@@ -671,6 +693,11 @@ export function ProjectDetail({
           Esperar a que el servicio anterior quede ready en arranques por lote
         </label>
       </div></div>
+      ) : (
+        <div className="min-h-0 flex-1 overflow-hidden p-4">
+          <ProjectMocksEditor project={draft} />
+        </div>
+      )}
 
       <div className="surface-divider-top flex flex-wrap items-center justify-between gap-2 px-4 py-3">
         <p className={["text-[11px]", saveState === "error" ? "text-danger" : "text-textSoft"].join(" ")}>Ultimo exit code: {draft.lastExitCode ?? "n/a"} | {saveHint}</p>
