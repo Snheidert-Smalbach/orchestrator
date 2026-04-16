@@ -6,6 +6,7 @@ import {
   FolderSearch,
   GripVertical,
   LoaderCircle,
+  Network,
   Play,
   Rocket,
   Square,
@@ -13,6 +14,7 @@ import {
   TriangleAlert,
 } from "lucide-react";
 import { Fragment, useEffect, useMemo, useState } from "react";
+import { openServiceTopologyWindow } from "../lib/tauri";
 import type { Project, ProjectResourceUsage } from "../lib/types";
 import { StatusPill } from "./status-pill";
 import { Badge } from "./ui/badge";
@@ -301,6 +303,17 @@ export function ProjectList({
           <h2 className="mt-0.5 text-[13px] font-semibold text-textStrong">Servicios configurados</h2>
         </div>
         <div className="flex flex-wrap items-center gap-1.5">
+          <Button
+            type="button"
+            variant="secondary"
+            size="sm"
+            onClick={() => void openServiceTopologyWindow(selectedProjectId)}
+            disabled={!projects.length}
+            title="Abrir el mapa visual de variables .env, enlaces y tráfico entre servicios"
+          >
+            <Network className="h-3.5 w-3.5" />
+            Mapa
+          </Button>
           <Button
             type="button"
             variant="secondary"

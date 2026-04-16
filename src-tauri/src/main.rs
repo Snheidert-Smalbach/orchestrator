@@ -7,6 +7,7 @@ mod models;
 mod process_control;
 mod runtime;
 mod scanner;
+mod service_graph;
 
 use std::{
     path::PathBuf,
@@ -58,6 +59,9 @@ fn main() {
             commands::import_detected_projects,
             commands::import_single_project,
             commands::save_project,
+            commands::get_service_graph_snapshot,
+            commands::save_service_link,
+            commands::delete_service_link,
             commands::save_preset,
             commands::delete_preset,
             commands::reorder_projects,
@@ -67,7 +71,8 @@ fn main() {
             commands::delete_project_mock,
             commands::start_projects,
             commands::stop_projects,
-            commands::force_stop_projects
+            commands::force_stop_projects,
+            commands::open_service_topology_window
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

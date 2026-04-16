@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState } from "react";
 import { AlertsDrawer } from "./components/alerts-drawer";
 import { AppHeader } from "./components/app-header";
 import { ScanDialog } from "./components/scan-dialog";
+import { ServiceTopologyStandaloneWindow } from "./components/service-topology-modal";
 import { UsageDrawer, type UsageStat } from "./components/usage-drawer";
 import { WorkspaceLayout } from "./components/workspace-layout";
 import { Button } from "./components/ui/button";
@@ -47,6 +48,26 @@ function quickProfileIcon(profileId: string) {
 }
 
 export default function App() {
+  const [themeMode, setThemeMode] = useState<ThemeMode>(resolveInitialThemeMode);
+  const [themeFamily, setThemeFamily] = useState(resolveInitialThemeFamily);
+  const topologyWindowParams =
+    typeof window !== "undefined" ? new URLSearchParams(window.location.search) : null;
+  const isTopologyWindow = topologyWindowParams?.get("topology") === "1";
+  const topologyFocusProjectId = topologyWindowParams?.get("focusProjectId");
+
+  useEffect(() => {
+    document.documentElement.dataset.theme = themeMode;
+    document.documentElement.dataset.themeMode = themeMode;
+    document.documentElement.dataset.themeFamily = themeFamily;
+    window.localStorage.setItem(THEME_MODE_STORAGE_KEY, themeMode);
+    window.localStorage.setItem(THEME_FAMILY_STORAGE_KEY, themeFamily);
+    window.localStorage.setItem(LEGACY_THEME_STORAGE_KEY, themeMode);
+  }, [themeFamily, themeMode]);
+
+  if (isTopologyWindow) {
+    return <ServiceTopologyStandaloneWindow focusProjectId={topologyFocusProjectId} />;
+  }
+
   const settings = useAppStore((state) => state.settings);
   const projects = useAppStore((state) => state.projects);
   const presets = useAppStore((state) => state.presets);
@@ -81,8 +102,6 @@ export default function App() {
     selectedProjectId ? state.runtimeMessages[selectedProjectId] ?? null : null,
   );
 
-  const [themeMode, setThemeMode] = useState<ThemeMode>(resolveInitialThemeMode);
-  const [themeFamily, setThemeFamily] = useState(resolveInitialThemeFamily);
   const [workspaceNameDraft, setWorkspaceNameDraft] = useState("");
   const [isWorkspaceCreatorOpen, setIsWorkspaceCreatorOpen] = useState(false);
   const [isUsageDrawerOpen, setIsUsageDrawerOpen] = useState(false);
@@ -108,15 +127,6 @@ export default function App() {
       window.clearInterval(interval);
     };
   }, [hasActiveRuntimeProjects, refreshDiagnostics]);
-
-  useEffect(() => {
-    document.documentElement.dataset.theme = themeMode;
-    document.documentElement.dataset.themeMode = themeMode;
-    document.documentElement.dataset.themeFamily = themeFamily;
-    window.localStorage.setItem(THEME_MODE_STORAGE_KEY, themeMode);
-    window.localStorage.setItem(THEME_FAMILY_STORAGE_KEY, themeFamily);
-    window.localStorage.setItem(LEGACY_THEME_STORAGE_KEY, themeMode);
-  }, [themeFamily, themeMode]);
 
   const selectedPreset = presets.find((preset) => preset.id === selectedPresetId) ?? presets[0] ?? null;
   const scopedProjectIds = selectedPreset && !selectedPreset.readOnly ? selectedPreset.projectIds : null;

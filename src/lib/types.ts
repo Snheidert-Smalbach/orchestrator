@@ -6,6 +6,8 @@ export type LaunchMode = "service" | "record" | "mock" | "unknown";
 export type MockMatchMode = "auto" | "strict" | "path" | "unknown";
 export type MockSource = "captured" | "manual" | "unknown";
 export type MockKind = "rest" | "graphql" | "http_other" | "unknown";
+export type ServiceLinkSource = "manual" | "inferred" | "unknown";
+export type ServiceGraphEnvSource = "env_file" | "override" | "linked" | "missing" | "unknown";
 export type ProjectStatus =
   | "idle"
   | "starting"
@@ -26,6 +28,58 @@ export interface ProjectDependency {
   id: string;
   dependsOnProjectId: string;
   requiredForStart: boolean;
+}
+
+export interface ProjectServiceLink {
+  id: string;
+  sourceProjectId: string;
+  sourceEnvKey: string;
+  targetProjectId: string;
+  targetEnvKey: string | null;
+  protocol: string;
+  host: string;
+  path: string;
+  query: string;
+}
+
+export interface ServiceGraphEnvVariable {
+  key: string;
+  value: string;
+  displayValue: string;
+  source: ServiceGraphEnvSource;
+  enabled: boolean;
+  isSecret: boolean;
+  isUrlLike: boolean;
+}
+
+export interface ServiceGraphProject {
+  projectId: string;
+  projectName: string;
+  status: ProjectStatus;
+  launchMode: LaunchMode;
+  configuredPort: number | null;
+  runtimePort: number | null;
+  envVariables: ServiceGraphEnvVariable[];
+}
+
+export interface ServiceGraphConnection {
+  id: string;
+  sourceProjectId: string;
+  sourceEnvKey: string;
+  targetProjectId: string;
+  targetEnvKey: string | null;
+  protocol: string;
+  host: string;
+  path: string;
+  query: string;
+  resolvedValue: string | null;
+  sourceValue: string | null;
+  linkSource: ServiceLinkSource;
+}
+
+export interface ServiceGraphSnapshot {
+  projects: ServiceGraphProject[];
+  connections: ServiceGraphConnection[];
 }
 
 export interface MockHeader {
@@ -179,5 +233,19 @@ export interface LogPayload {
   projectId: string;
   stream: "stdout" | "stderr" | "system";
   line: string;
+  timestamp: string;
+}
+
+export interface ServiceTrafficEvent {
+  id: string;
+  sourceProjectId: string | null;
+  sourceLabel: string | null;
+  targetProjectId: string;
+  method: string;
+  path: string;
+  statusCode: number | null;
+  ok: boolean;
+  durationMs: number | null;
+  error: string | null;
   timestamp: string;
 }

@@ -6,11 +6,17 @@ import type {
   ProjectMock,
   ProjectMockCollection,
   ProjectMockSummary,
+  ProjectServiceLink,
   ProcessDiagnostic,
   Preset,
   ProjectResourceUsage,
   ProjectOrderUpdate,
   RuntimeStatusPayload,
+  ServiceGraphConnection,
+  ServiceGraphEnvVariable,
+  ServiceGraphProject,
+  ServiceGraphSnapshot,
+  ServiceTrafficEvent,
   Project,
   Snapshot,
   SystemDiagnostics,
@@ -18,9 +24,12 @@ import type {
 
 const STORAGE_KEY = "back-orchestrator.mock.snapshot";
 const MOCK_STORAGE_PREFIX = "back-orchestrator.mock.registry.";
+const SERVICE_LINK_STORAGE_KEY = "back-orchestrator.service-links";
+const SERVICE_TOPOLOGY_WINDOW_LABEL = "service-topology-window";
 
 const statusListeners = new Set<(payload: RuntimeStatusPayload) => void>();
 const logListeners = new Set<(payload: LogPayload) => void>();
+const trafficListeners = new Set<(payload: ServiceTrafficEvent) => void>();
 
 function detectClientOs() {
   if (typeof navigator === "undefined") {
@@ -66,6 +75,14 @@ function isTauriRuntime() {
 
 function createId(prefix: string) {
   return `${prefix}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
+function buildServiceTopologyWindowUrl(focusProjectId?: string | null) {
+  const params = new URLSearchParams({ topology: "1" });
+  if (focusProjectId) {
+    params.set("focusProjectId", focusProjectId);
+  }
+  return `/?${params.toString()}`;
 }
 
 function compareProjects(left: Project, right: Project) {
@@ -354,6 +371,153 @@ function saveMockSnapshot(snapshot: Snapshot) {
   window.localStorage.setItem(STORAGE_KEY, JSON.stringify(normalizeSnapshot(snapshot)));
 }
 
+function normalizeLinkPath(path: string) {
+  const trimmed = path.trim();
+  if (!trimmed) {
+    return "";
+  }
+  return trimmed.startsWith("/") ? trimmed : `/${trimmed}`;
+}
+
+function normalizeLinkQuery(query: string) {
+  const trimmed = query.trim();
+  if (!trimmed) {
+    return "";
+  }
+  return trimmed.startsWith("?") ? trimmed : `?${trimmed}`;
+}
+
+function normalizeProtocol(protocol: string) {
+  return protocol.trim().toLowerCase() === "https" ? "https" : "http";
+}
+
+function normalizeHost(host: string) {
+  return host.trim() || "127.0.0.1";
+}
+
+function buildDisplayValue(value: string, isSecret: boolean) {
+  if (!isSecret || !value.trim()) {
+    return value;
+  }
+
+  const visibleTail = value.slice(-4);
+  return visibleTail ? `********${visibleTail}` : "********";
+}
+
+function isUrlLike(value: string) {
+  const trimmed = value.trim();
+  return (
+    trimmed.includes("://") ||
+    trimmed.startsWith("localhost:") ||
+    trimmed.startsWith("127.0.0.1:") ||
+    trimmed.startsWith("[::1]:")
+  );
+}
+
+function readMockServiceLinks() {
+  if (typeof window === "undefined") {
+    return [] as ProjectServiceLink[];
+  }
+
+  try {
+    const raw = window.localStorage.getItem(SERVICE_LINK_STORAGE_KEY);
+    if (!raw) {
+      return [] as ProjectServiceLink[];
+    }
+
+    return (JSON.parse(raw) as ProjectServiceLink[]).filter((entry) =>
+      entry.id && entry.sourceProjectId && entry.sourceEnvKey && entry.targetProjectId,
+    );
+  } catch {
+    return [] as ProjectServiceLink[];
+  }
+}
+
+function saveMockServiceLinks(links: ProjectServiceLink[]) {
+  window.localStorage.setItem(SERVICE_LINK_STORAGE_KEY, JSON.stringify(links));
+  return links;
+}
+
+function buildMockProjectEnvVariables(project: Project, links: ProjectServiceLink[]) {
+  const variables = new Map<string, ServiceGraphEnvVariable>();
+
+  for (const override of project.envOverrides) {
+    variables.set(override.key, {
+      key: override.key,
+      value: override.value,
+      displayValue: buildDisplayValue(override.value, override.isSecret),
+      source: "override",
+      enabled: override.enabled,
+      isSecret: override.isSecret,
+      isUrlLike: isUrlLike(override.value),
+    });
+  }
+
+  for (const link of links.filter((entry) => entry.sourceProjectId === project.id)) {
+    if (!variables.has(link.sourceEnvKey)) {
+      variables.set(link.sourceEnvKey, {
+        key: link.sourceEnvKey,
+        value: "",
+        displayValue: "Configurar desde el mapa",
+        source: "missing",
+        enabled: true,
+        isSecret: /(secret|token|password|key)/i.test(link.sourceEnvKey),
+        isUrlLike: false,
+      });
+    }
+  }
+
+  return [...variables.values()].sort((left, right) => left.key.localeCompare(right.key));
+}
+
+function buildMockServiceGraphSnapshot(): ServiceGraphSnapshot {
+  const snapshot = mergePresetIds(loadMockSnapshot());
+  const links = readMockServiceLinks();
+  const projectsById = new Map(snapshot.projects.map((project) => [project.id, project]));
+
+  const projects: ServiceGraphProject[] = snapshot.projects.map((project) => ({
+    projectId: project.id,
+    projectName: project.name,
+    status: project.status,
+    launchMode: project.launchMode,
+    configuredPort: project.port,
+    runtimePort: project.port,
+    envVariables: buildMockProjectEnvVariables(project, links),
+  }));
+
+  const connections: ServiceGraphConnection[] = links
+    .map((link) => {
+      const sourceProject = projectsById.get(link.sourceProjectId) ?? null;
+      const targetProject = projectsById.get(link.targetProjectId) ?? null;
+      const sourceValue =
+        sourceProject?.envOverrides.find((entry) => entry.key === link.sourceEnvKey)?.value ?? null;
+      const resolvedValue = targetProject?.port
+        ? `${normalizeProtocol(link.protocol)}://${normalizeHost(link.host)}:${targetProject.port}${normalizeLinkPath(link.path)}${normalizeLinkQuery(link.query)}`
+        : null;
+
+      return {
+        ...link,
+        protocol: normalizeProtocol(link.protocol),
+        host: normalizeHost(link.host),
+        path: normalizeLinkPath(link.path),
+        query: normalizeLinkQuery(link.query),
+        resolvedValue,
+        sourceValue,
+        linkSource: "manual",
+      } satisfies ServiceGraphConnection;
+    })
+    .sort((left, right) =>
+      left.sourceProjectId.localeCompare(right.sourceProjectId) ||
+      left.sourceEnvKey.localeCompare(right.sourceEnvKey) ||
+      left.targetProjectId.localeCompare(right.targetProjectId),
+    );
+
+  return {
+    projects,
+    connections,
+  };
+}
+
 function emitStatus(payload: RuntimeStatusPayload) {
   for (const listener of statusListeners) {
     listener(payload);
@@ -362,6 +526,12 @@ function emitStatus(payload: RuntimeStatusPayload) {
 
 function emitLog(payload: LogPayload) {
   for (const listener of logListeners) {
+    listener(payload);
+  }
+}
+
+function emitTraffic(payload: ServiceTrafficEvent) {
+  for (const listener of trafficListeners) {
     listener(payload);
   }
 }
@@ -390,6 +560,38 @@ export async function getSnapshot() {
   }
 
   return mergePresetIds(loadMockSnapshot());
+}
+
+export async function getServiceGraphSnapshot() {
+  if (isTauriRuntime()) {
+    return invoke<ServiceGraphSnapshot>("get_service_graph_snapshot");
+  }
+
+  return buildMockServiceGraphSnapshot();
+}
+
+export async function saveServiceLink(link: ProjectServiceLink) {
+  if (isTauriRuntime()) {
+    return invoke<ServiceGraphSnapshot>("save_service_link", { link });
+  }
+
+  const current = readMockServiceLinks().filter(
+    (entry) => !(entry.sourceProjectId === link.sourceProjectId && entry.sourceEnvKey === link.sourceEnvKey && entry.id !== link.id),
+  );
+  const next = current.some((entry) => entry.id === link.id)
+    ? current.map((entry) => (entry.id === link.id ? link : entry))
+    : [...current, link];
+  saveMockServiceLinks(next);
+  return buildMockServiceGraphSnapshot();
+}
+
+export async function deleteServiceLink(linkId: string) {
+  if (isTauriRuntime()) {
+    return invoke<ServiceGraphSnapshot>("delete_service_link", { linkId });
+  }
+
+  saveMockServiceLinks(readMockServiceLinks().filter((entry) => entry.id !== linkId));
+  return buildMockServiceGraphSnapshot();
 }
 
 export async function getRuntimeDiagnostics() {
@@ -699,6 +901,8 @@ export async function startProjects(projectIds?: string[]) {
   const orderedProjects = normalizedNext.projects
     .filter((entry) => ids.has(entry.id))
     .sort(compareProjects);
+  const mockServiceLinks = readMockServiceLinks();
+  const projectsById = new Map(normalizedNext.projects.map((project) => [project.id, project]));
   let previousReadyAt = 0;
 
   for (const [index, project] of orderedProjects.entries()) {
@@ -739,6 +943,31 @@ export async function startProjects(projectIds?: string[]) {
         stream: "stdout",
         line: project.port ? `Ready on port ${project.port}` : "Ready",
         timestamp: new Date().toISOString(),
+      });
+
+      const outgoingLinks = mockServiceLinks.filter((entry) => entry.sourceProjectId === project.id);
+      outgoingLinks.forEach((link, linkIndex) => {
+        const targetProject = projectsById.get(link.targetProjectId);
+        if (!targetProject) {
+          return;
+        }
+
+        const failed = linkIndex % 4 === 3;
+        window.setTimeout(() => {
+          emitTraffic({
+            id: createId("traffic"),
+            sourceProjectId: project.id,
+            sourceLabel: project.name,
+            targetProjectId: targetProject.id,
+            method: linkIndex % 2 === 0 ? "GET" : "POST",
+            path: normalizeLinkPath(link.path) || "/health",
+            statusCode: failed ? 502 : 200,
+            ok: !failed,
+            durationMs: 42 + linkIndex * 17,
+            error: failed ? `Timeout llamando ${targetProject.name}` : null,
+            timestamp: new Date().toISOString(),
+          });
+        }, 420 + linkIndex * 180);
       });
     }, readyAt);
   }
@@ -880,6 +1109,44 @@ export async function listenRuntimeEvents(
     statusListeners.delete(onStatus);
     logListeners.delete(onLog);
   };
+}
+
+export async function listenServiceTrafficEvents(
+  onTraffic: (payload: ServiceTrafficEvent) => void,
+) {
+  if (isTauriRuntime()) {
+    const unlistenTraffic = await listen<ServiceTrafficEvent>("service-traffic", (event) => {
+      onTraffic(event.payload);
+    });
+
+    return () => {
+      unlistenTraffic();
+    };
+  }
+
+  trafficListeners.add(onTraffic);
+
+  return () => {
+    trafficListeners.delete(onTraffic);
+  };
+}
+
+export async function openServiceTopologyWindow(focusProjectId?: string | null) {
+  const url = buildServiceTopologyWindowUrl(focusProjectId);
+
+  if (isTauriRuntime()) {
+    await invoke("open_service_topology_window", {
+      focusProjectId: focusProjectId ?? null,
+    });
+    return;
+  }
+
+  const popup = window.open(
+    url,
+    SERVICE_TOPOLOGY_WINDOW_LABEL,
+    "popup=yes,width=1760,height=1100,resizable=yes,scrollbars=yes",
+  );
+  popup?.focus();
 }
 
 export async function pickRootFromDialog(defaultPath?: string | null) {

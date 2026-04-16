@@ -81,7 +81,10 @@ pub fn save_project_mock(
     let mut lines = load_registry_lines(db_path, project_id)?;
     let persisted = project_mock_to_line(mock);
 
-    if let Some(index) = lines.iter().position(|entry| stable_line_id(entry) == persisted.id) {
+    if let Some(index) = lines
+        .iter()
+        .position(|entry| stable_line_id(entry) == persisted.id)
+    {
         lines[index] = persisted;
     } else {
         lines.push(persisted);
@@ -277,7 +280,8 @@ fn project_mock_to_line(mock: ProjectMock) -> PersistedMockLine {
     let response_content_type = normalize_optional_string(mock.response_content_type);
     let request_body = mock.request_body;
     let response_body = mock.response_body;
-    let normalized_request_body = normalize_body(request_body.as_bytes(), request_content_type.as_deref());
+    let normalized_request_body =
+        normalize_body(request_body.as_bytes(), request_content_type.as_deref());
     let resolved_kind = match mock.kind {
         MockKind::Unknown => detect_kind(
             &mock.request_path,

@@ -1,10 +1,19 @@
-use tauri::{AppHandle, State};
+use serde::Serialize;
+use tauri::{AppHandle, Emitter, Manager, State, WebviewUrl, WebviewWindowBuilder};
 
 use crate::models::{
-    Preset, Project, ProjectMock, ProjectMockCollection, ProjectOrderUpdate, Snapshot,
-    SystemDiagnostics,
+    Preset, Project, ProjectMock, ProjectMockCollection, ProjectOrderUpdate, ProjectServiceLink,
+    ServiceGraphSnapshot, Snapshot, SystemDiagnostics,
 };
-use crate::{db, diagnostics, mock_catalog, runtime, scanner, AppState};
+use crate::{db, diagnostics, mock_catalog, runtime, scanner, service_graph, AppState};
+
+const SERVICE_TOPOLOGY_WINDOW_LABEL: &str = "service-topology-window";
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ServiceTopologyFocusPayload {
+    focus_project_id: Option<String>,
+}
 
 fn map_error<T>(result: anyhow::Result<T>) -> Result<T, String> {
     result.map_err(|error| error.to_string())
@@ -113,6 +122,32 @@ pub fn save_project(project: Project, state: State<'_, AppState>) -> Result<Snap
 }
 
 #[tauri::command]
+pub async fn get_service_graph_snapshot(
+    state: State<'_, AppState>,
+) -> Result<ServiceGraphSnapshot, String> {
+    let state = state.inner().clone();
+    map_error(service_graph::build_service_graph_snapshot(state).await)
+}
+
+#[tauri::command]
+pub async fn save_service_link(
+    link: ProjectServiceLink,
+    state: State<'_, AppState>,
+) -> Result<ServiceGraphSnapshot, String> {
+    map_error(db::save_service_link(&state.db_path, &link))?;
+    map_error(service_graph::build_service_graph_snapshot(state.inner().clone()).await)
+}
+
+#[tauri::command]
+pub async fn delete_service_link(
+    link_id: String,
+    state: State<'_, AppState>,
+) -> Result<ServiceGraphSnapshot, String> {
+    map_error(db::delete_service_link(&state.db_path, &link_id))?;
+    map_error(service_graph::build_service_graph_snapshot(state.inner().clone()).await)
+}
+
+#[tauri::command]
 pub fn save_preset(preset: Preset, state: State<'_, AppState>) -> Result<Snapshot, String> {
     map_error(db::save_preset(&state.db_path, &preset))?;
     map_error(db::build_snapshot(&state.db_path))
@@ -144,7 +179,10 @@ pub fn get_project_mocks(
     project_id: String,
     state: State<'_, AppState>,
 ) -> Result<ProjectMockCollection, String> {
-    map_error(mock_catalog::list_project_mocks(&state.db_path, &project_id))
+    map_error(mock_catalog::list_project_mocks(
+        &state.db_path,
+        &project_id,
+    ))
 }
 
 #[tauri::command]
@@ -204,4 +242,49 @@ pub async fn force_stop_projects(
     let state = state.inner().clone();
     map_error(runtime::force_stop_selected(app, state.clone(), project_ids).await)?;
     map_error(db::build_snapshot(&state.db_path))
+}
+
+#[tauri::command]
+pub async fn open_service_topology_window(
+    app: AppHandle,
+    focus_project_id: Option<String>,
+) -> Result<(), String> {
+    if let Some(window) = app.get_webview_window(SERVICE_TOPOLOGY_WINDOW_LABEL) {
+        if focus_project_id.is_some() {
+            app.emit_to(
+                SERVICE_TOPOLOGY_WINDOW_LABEL,
+                "service-topology-focus-project",
+                ServiceTopologyFocusPayload {
+                    focus_project_id: focus_project_id.clone(),
+                },
+            )
+            .map_err(|error| error.to_string())?;
+        }
+
+        let _ = window.unminimize();
+        let _ = window.show();
+        let _ = window.set_focus();
+        return Ok(());
+    }
+
+    let mut url = String::from("index.html?topology=1");
+    if let Some(project_id) = focus_project_id {
+        url.push_str("&focusProjectId=");
+        url.push_str(&project_id);
+    }
+
+    WebviewWindowBuilder::new(
+        &app,
+        SERVICE_TOPOLOGY_WINDOW_LABEL,
+        WebviewUrl::App(url.into()),
+    )
+    .title("Mapa visual de microservicios")
+    .inner_size(1760.0, 1100.0)
+    .min_inner_size(1280.0, 820.0)
+    .center()
+    .resizable(true)
+    .focused(true)
+    .build()
+    .map(|_| ())
+    .map_err(|error| error.to_string())
 }

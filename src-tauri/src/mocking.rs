@@ -4,21 +4,26 @@ use std::{
     io::Write,
     path::{Path, PathBuf},
     sync::{Arc, Mutex, OnceLock},
-    time::{Duration, SystemTime, UNIX_EPOCH},
+    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
 use anyhow::{anyhow, Context, Result};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
-use tauri::{AppHandle, Emitter};
+use tauri::{AppHandle, Emitter, Manager};
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::{TcpListener, TcpStream},
+    process::Command,
     sync::watch,
     time::timeout,
 };
 
-use crate::models::{MockMatchMode, Project};
+use crate::{
+    db,
+    models::{MockMatchMode, Project, ServiceTrafficEvent},
+    AppState,
+};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -91,6 +96,14 @@ struct HttpResponseMessage {
     body: Vec<u8>,
 }
 
+#[derive(Debug, Clone, Deserialize)]
+struct ProcessParentSnapshot {
+    #[serde(rename = "ProcessId")]
+    process_id: u32,
+    #[serde(rename = "ParentProcessId")]
+    parent_process_id: Option<u32>,
+}
+
 static CAPTURE_APPEND_LOCKS: OnceLock<Mutex<HashMap<PathBuf, Arc<Mutex<()>>>>> = OnceLock::new();
 
 #[derive(Debug, Clone)]
@@ -145,6 +158,177 @@ fn emit_log(app: &AppHandle, project_id: &str, stream: &str, line: impl Into<Str
             project_id: project_id.to_string(),
             stream: stream.to_string(),
             line: line.into(),
+            timestamp: timestamp_now(),
+        },
+    );
+}
+
+fn emit_traffic(app: &AppHandle, payload: ServiceTrafficEvent) {
+    let _ = app.emit("service-traffic", payload);
+}
+
+fn parse_remote_port(remote_address: &str) -> Option<u16> {
+    remote_address
+        .rsplit_once(':')
+        .and_then(|(_, port)| port.parse::<u16>().ok())
+}
+
+async fn lookup_source_pid(remote_port: u16, target_port: u16) -> Option<u32> {
+    if !cfg!(windows) {
+        return None;
+    }
+
+    let script = format!(
+        "Get-NetTCPConnection -LocalPort {remote_port} -RemotePort {target_port} -ErrorAction SilentlyContinue | Select-Object -First 1 -ExpandProperty OwningProcess"
+    );
+
+    let output = Command::new("powershell.exe")
+        .arg("-NoProfile")
+        .arg("-Command")
+        .arg(script)
+        .output()
+        .await
+        .ok()?;
+
+    if !output.status.success() {
+        return None;
+    }
+
+    String::from_utf8_lossy(&output.stdout)
+        .split_whitespace()
+        .find_map(|token| token.trim().parse::<u32>().ok())
+}
+
+async fn collect_process_parent_map() -> Option<HashMap<u32, Option<u32>>> {
+    if !cfg!(windows) {
+        return None;
+    }
+
+    let script = "Get-CimInstance Win32_Process | Select-Object ProcessId, ParentProcessId | ConvertTo-Json -Depth 3 -Compress";
+    let output = Command::new("powershell.exe")
+        .arg("-NoProfile")
+        .arg("-Command")
+        .arg(script)
+        .output()
+        .await
+        .ok()?;
+
+    if !output.status.success() {
+        return None;
+    }
+
+    let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if stdout.is_empty() {
+        return None;
+    }
+
+    let snapshots = serde_json::from_str::<Vec<ProcessParentSnapshot>>(&stdout)
+        .or_else(|_| serde_json::from_str::<ProcessParentSnapshot>(&stdout).map(|item| vec![item]))
+        .ok()?;
+
+    Some(
+        snapshots
+            .into_iter()
+            .map(|item| (item.process_id, item.parent_process_id))
+            .collect(),
+    )
+}
+
+async fn resolve_project_id_for_pid(app: &AppHandle, pid: u32) -> Option<String> {
+    let state = app.state::<AppState>().inner().clone();
+    let tracked_roots = {
+        let runtime = state.runtime.lock().await;
+        runtime
+            .running
+            .iter()
+            .filter_map(|(project_id, entry)| {
+                entry
+                    .pid
+                    .map(|tracked_pid| (tracked_pid, project_id.clone()))
+            })
+            .collect::<HashMap<_, _>>()
+    };
+
+    if let Some(project_id) = tracked_roots.get(&pid) {
+        return Some(project_id.clone());
+    }
+
+    let parent_map = collect_process_parent_map().await?;
+    let mut current_pid = Some(pid);
+    for _ in 0..40 {
+        let current = current_pid?;
+        if let Some(project_id) = tracked_roots.get(&current) {
+            return Some(project_id.clone());
+        }
+        current_pid = parent_map.get(&current).copied().flatten();
+    }
+
+    None
+}
+
+async fn resolve_source_project(
+    app: &AppHandle,
+    remote_address: &str,
+    target_port: u16,
+) -> Option<String> {
+    let remote_port = parse_remote_port(remote_address)?;
+    let source_pid = lookup_source_pid(remote_port, target_port).await?;
+    resolve_project_id_for_pid(app, source_pid).await
+}
+
+async fn resolve_source_label(
+    app: &AppHandle,
+    source_project_id: Option<&String>,
+    remote_address: &str,
+) -> Option<String> {
+    let Some(project_id) = source_project_id else {
+        return Some(remote_address.to_string());
+    };
+    let state = app.state::<AppState>().inner().clone();
+    let projects = db::list_projects(&state.db_path).ok()?;
+    projects
+        .into_iter()
+        .find(|project| &project.id == project_id)
+        .map(|project| project.name)
+        .or_else(|| Some(remote_address.to_string()))
+}
+
+async fn resolve_traffic_source(
+    app: &AppHandle,
+    remote_address: &str,
+    target_port: u16,
+) -> (Option<String>, Option<String>) {
+    let source_project_id = resolve_source_project(app, remote_address, target_port).await;
+    let source_label = resolve_source_label(app, source_project_id.as_ref(), remote_address).await;
+    (source_project_id, source_label)
+}
+
+async fn emit_request_traffic(
+    app: &AppHandle,
+    project: &Project,
+    source_project_id: Option<String>,
+    source_label: Option<String>,
+    method: &str,
+    path: &str,
+    status_code: Option<u16>,
+    error: Option<String>,
+    duration_ms: Option<u64>,
+) {
+    let ok = error.is_none() && status_code.map(|value| value < 400).unwrap_or(false);
+
+    emit_traffic(
+        app,
+        ServiceTrafficEvent {
+            id: uuid::Uuid::new_v4().to_string(),
+            source_project_id,
+            source_label,
+            target_project_id: project.id.clone(),
+            method: method.to_string(),
+            path: path.to_string(),
+            status_code,
+            ok,
+            duration_ms,
+            error,
             timestamp: timestamp_now(),
         },
     );
@@ -216,7 +400,17 @@ pub async fn start_recording_proxy(
                     let project = project.clone();
                     let project_id = project_id.clone();
                     tokio::spawn(async move {
-                        if let Err(error) = handle_proxy_connection(app_handle.clone(), db_path, project, socket, address.to_string(), upstream_port).await {
+                        if let Err(error) = handle_proxy_connection(
+                            app_handle.clone(),
+                            db_path,
+                            project,
+                            socket,
+                            address.to_string(),
+                            public_port,
+                            upstream_port,
+                        )
+                        .await
+                        {
                             emit_log(&app_handle, &project_id, "stderr", format!("Recording proxy error: {error}"));
                         }
                     });
@@ -286,6 +480,7 @@ pub async fn start_mock_server(
                             project,
                             socket,
                             address.to_string(),
+                            public_port,
                         )
                         .await
                         {
@@ -311,9 +506,14 @@ async fn handle_proxy_connection(
     project: Project,
     mut socket: TcpStream,
     remote_address: String,
+    public_port: u16,
     upstream_port: u16,
 ) -> Result<()> {
+    let started_at = Instant::now();
+    let (source_project_id, source_label) =
+        resolve_traffic_source(&app, &remote_address, public_port).await;
     let request = read_http_request(&mut socket).await?;
+    let (request_path, _) = split_target(&request.target);
     emit_log(
         &app,
         &project.id,
@@ -324,15 +524,53 @@ async fn handle_proxy_connection(
         ),
     );
 
-    let mut upstream = TcpStream::connect(("127.0.0.1", upstream_port))
-        .await
-        .with_context(|| format!("Could not reach upstream service on {upstream_port}"))?;
+    let mut upstream = match TcpStream::connect(("127.0.0.1", upstream_port)).await {
+        Ok(upstream) => upstream,
+        Err(error) => {
+            let message = format!("Could not reach upstream service on {upstream_port}: {error}");
+            emit_request_traffic(
+                &app,
+                &project,
+                source_project_id.clone(),
+                source_label.clone(),
+                &request.method,
+                &request_path,
+                Some(502),
+                Some(message.clone()),
+                Some(started_at.elapsed().as_millis() as u64),
+            )
+            .await;
+            return Err(error)
+                .with_context(|| format!("Could not reach upstream service on {upstream_port}"));
+        }
+    };
     let upstream_payload = serialize_request(&request);
     upstream.write_all(&upstream_payload).await?;
     upstream.flush().await?;
 
-    let response =
-        read_http_response(&mut upstream, request.method.eq_ignore_ascii_case("HEAD")).await?;
+    let response = match read_http_response(
+        &mut upstream,
+        request.method.eq_ignore_ascii_case("HEAD"),
+    )
+    .await
+    {
+        Ok(response) => response,
+        Err(error) => {
+            emit_request_traffic(
+                &app,
+                &project,
+                source_project_id.clone(),
+                source_label.clone(),
+                &request.method,
+                &request_path,
+                None,
+                Some(error.to_string()),
+                Some(started_at.elapsed().as_millis() as u64),
+            )
+            .await;
+            return Err(error);
+        }
+    };
     let exchange = build_exchange(&request, &response);
     append_exchange(&db_path, &project.id, &exchange)?;
     emit_log(
@@ -342,11 +580,23 @@ async fn handle_proxy_connection(
         format!(
             "Recorded {} {} -> {} ({})",
             request.method,
-            split_target(&request.target).0,
+            request_path,
             response.status_code,
             kind_label(&exchange.kind)
         ),
     );
+    emit_request_traffic(
+        &app,
+        &project,
+        source_project_id.clone(),
+        source_label.clone(),
+        &request.method,
+        &request_path,
+        Some(response.status_code),
+        None,
+        Some(started_at.elapsed().as_millis() as u64),
+    )
+    .await;
 
     let response_payload = serialize_response(&response);
     socket.write_all(&response_payload).await?;
@@ -361,7 +611,11 @@ async fn handle_mock_connection(
     project: Project,
     mut socket: TcpStream,
     remote_address: String,
+    public_port: u16,
 ) -> Result<()> {
+    let started_at = Instant::now();
+    let (source_project_id, source_label) =
+        resolve_traffic_source(&app, &remote_address, public_port).await;
     let request = read_http_request(&mut socket).await?;
     let request_view = build_request_record(&request);
     let RegistryLoad { entries, warnings } = load_registry(&db_path, &project.id)?;
@@ -370,33 +624,52 @@ async fn handle_mock_connection(
         emit_log(&app, &project.id, "stderr", warning);
     }
 
-    let response =
-        if let Some(exchange) = find_matching_exchange(&project, &entries, &request_view) {
-            emit_log(
-                &app,
-                &project.id,
-                "system",
-                format!(
-                    "MOCK HIT {} {} from {} ({})",
-                    request.method,
-                    request.target,
-                    remote_address,
-                    kind_label(&exchange.kind)
-                ),
-            );
-            build_response_from_record(&exchange.response)?
+    let response = if let Some(exchange) = find_matching_exchange(&project, &entries, &request_view)
+    {
+        emit_log(
+            &app,
+            &project.id,
+            "system",
+            format!(
+                "MOCK HIT {} {} from {} ({})",
+                request.method,
+                request.target,
+                remote_address,
+                kind_label(&exchange.kind)
+            ),
+        );
+        build_response_from_record(&exchange.response)?
+    } else {
+        emit_log(
+            &app,
+            &project.id,
+            "stderr",
+            format!(
+                "MOCK MISS {} {} from {}",
+                request.method, request.target, remote_address
+            ),
+        );
+        build_unmatched_response(&project, &request_view)
+    };
+    emit_request_traffic(
+        &app,
+        &project,
+        source_project_id,
+        source_label,
+        &request.method,
+        &request_view.path,
+        Some(response.status_code),
+        if response.status_code >= 400 {
+            Some(format!(
+                "Mock response returned {} for {} {}",
+                response.status_code, request.method, request_view.path
+            ))
         } else {
-            emit_log(
-                &app,
-                &project.id,
-                "stderr",
-                format!(
-                    "MOCK MISS {} {} from {}",
-                    request.method, request.target, remote_address
-                ),
-            );
-            build_unmatched_response(&project, &request_view)
-        };
+            None
+        },
+        Some(started_at.elapsed().as_millis() as u64),
+    )
+    .await;
 
     let payload = serialize_response(&response);
     socket.write_all(&payload).await?;

@@ -22,7 +22,7 @@ use crate::{
         RuntimeStatusPayload,
     },
     process_control::JobHandle,
-    AppState,
+    service_graph, AppState,
 };
 
 #[derive(Debug, Clone)]
@@ -250,7 +250,7 @@ fn parse_env_file(path: &str) -> Result<Vec<(String, String)>> {
     Ok(content.lines().filter_map(parse_env_line).collect())
 }
 
-fn load_environment(project: &Project) -> Result<HashMap<String, String>> {
+async fn load_environment(state: &AppState, project: &Project) -> Result<HashMap<String, String>> {
     let mut envs = std::env::vars().collect::<HashMap<_, _>>();
     let mut has_explicit_port = false;
 
@@ -280,15 +280,40 @@ fn load_environment(project: &Project) -> Result<HashMap<String, String>> {
         }
     }
 
+    let linked_projects = db::list_projects(&state.db_path)?;
+    let runtime_public_ports = {
+        let runtime = state.runtime.lock().await;
+        runtime
+            .running
+            .iter()
+            .map(|(project_id, entry)| {
+                (
+                    project_id.clone(),
+                    entry.public_port.or(entry.internal_port),
+                )
+            })
+            .collect::<HashMap<_, _>>()
+    };
+    let resolved_links = service_graph::resolve_service_links_for_project(
+        &state.db_path,
+        project,
+        &linked_projects,
+        &runtime_public_ports,
+    )?;
+    for (key, value) in resolved_links {
+        envs.insert(key, value);
+    }
+
     Ok(envs)
 }
 
-fn load_environment_for_launch(
+async fn load_environment_for_launch(
+    state: &AppState,
     project: &Project,
     forced_port: Option<u16>,
     public_port: Option<u16>,
 ) -> Result<HashMap<String, String>> {
-    let mut envs = load_environment(project)?;
+    let mut envs = load_environment(state, project).await?;
 
     if let Some(port) = forced_port {
         envs.insert("PORT".to_string(), port.to_string());
@@ -415,6 +440,16 @@ fn output_indicates_missing_process(output: &std::process::Output) -> bool {
         || combined.contains("cannot find the process")
 }
 
+fn output_indicates_access_denied(output: &std::process::Output) -> bool {
+    let (stdout, stderr) = parse_command_output(output);
+    let combined = format!("{stdout}\n{stderr}").to_ascii_lowercase();
+
+    combined.contains("access is denied")
+        || combined.contains("access denied")
+        || combined.contains("acceso denegado")
+        || combined.contains("requested operation requires elevation")
+}
+
 fn command_failure_reason(output: &std::process::Output) -> String {
     let (stdout, stderr) = parse_command_output(output);
     if !stderr.is_empty() {
@@ -424,6 +459,61 @@ fn command_failure_reason(output: &std::process::Output) -> String {
     } else {
         "command finished without additional output".to_string()
     }
+}
+
+async fn is_windows_administrator() -> Result<bool> {
+    let output = Command::new("powershell.exe")
+        .arg("-NoProfile")
+        .arg("-Command")
+        .arg("[bool](([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator))")
+        .output()
+        .await?;
+
+    if !output.status.success() {
+        return Err(anyhow!(command_failure_reason(&output)));
+    }
+
+    Ok(String::from_utf8_lossy(&output.stdout)
+        .trim()
+        .eq_ignore_ascii_case("true"))
+}
+
+async fn force_kill_pid_elevated_windows(
+    app: &AppHandle,
+    project_id: &str,
+    pid: u32,
+) -> Result<std::process::Output> {
+    let taskkill_path = std::env::var("SystemRoot")
+        .map(|root| format!(r"{root}\System32\taskkill.exe"))
+        .unwrap_or_else(|_| "taskkill.exe".to_string());
+    let powershell_script = format!(
+        concat!(
+            "$ErrorActionPreference = 'Stop'; ",
+            "try {{ ",
+            "$process = Start-Process -FilePath '{}' -ArgumentList @('/PID','{}','/T','/F') -Verb RunAs -WindowStyle Hidden -Wait -PassThru; ",
+            "exit $process.ExitCode; ",
+            "}} catch {{ ",
+            "Write-Error $_.Exception.Message; ",
+            "exit 1223; ",
+            "}}"
+        ),
+        escape_powershell_single_quotes(&taskkill_path),
+        pid
+    );
+
+    emit_log(
+        app,
+        project_id,
+        "system",
+        format!("CMD powershell elevated-taskkill {pid}"),
+    );
+
+    Ok(Command::new("powershell.exe")
+        .arg("-NoProfile")
+        .arg("-Command")
+        .arg(powershell_script)
+        .output()
+        .await?)
 }
 
 fn parse_pid_tokens(output: &str) -> Vec<u32> {
@@ -843,6 +933,50 @@ async fn force_kill_pid(app: &AppHandle, project_id: &str, pid: u32) -> Result<(
             return Ok(());
         }
 
+        if output_indicates_access_denied(&output) {
+            let already_elevated = is_windows_administrator().await.unwrap_or(false);
+            emit_log(
+                app,
+                project_id,
+                "stderr",
+                if already_elevated {
+                    format!(
+                        "taskkill /F reported access denied for PID {pid} even while already elevated"
+                    )
+                } else {
+                    format!(
+                        "taskkill /F reported access denied for PID {pid}; retrying with administrator elevation"
+                    )
+                },
+            );
+
+            let elevated_output = force_kill_pid_elevated_windows(app, project_id, pid).await?;
+            if elevated_output.status.success()
+                || output_indicates_missing_process(&elevated_output)
+            {
+                return Ok(());
+            }
+
+            let reason = command_failure_reason(&elevated_output);
+            if elevated_output.status.code() == Some(1223)
+                || reason.to_ascii_lowercase().contains("1223")
+                || reason
+                    .to_ascii_lowercase()
+                    .contains("operation was canceled")
+                || reason.to_ascii_lowercase().contains("canceled by the user")
+                || reason
+                    .to_ascii_lowercase()
+                    .contains("cancelled by the user")
+            {
+                return Err(anyhow!(
+                    "Administrator privileges were required to terminate PID {} and the Windows UAC prompt was canceled",
+                    pid
+                ));
+            }
+
+            return Err(anyhow!(reason));
+        }
+
         return Err(anyhow!(command_failure_reason(&output)));
     }
 
@@ -914,10 +1048,15 @@ async fn force_stop_project(
         if entry.managed_server.is_some()
             && !wait_for_managed_server_shutdown(entry, entry.public_port.or(project.port)).await
         {
-            return Err(anyhow!(managed_server_stop_failure(
-                &project.name,
-                entry.public_port.or(project.port),
-            )));
+            emit_log(
+                app,
+                &project.id,
+                "stderr",
+                format!(
+                    "{}; continuing with PID/port force stop",
+                    managed_server_stop_failure(&project.name, entry.public_port.or(project.port))
+                ),
+            );
         }
     }
 
@@ -1087,7 +1226,9 @@ async fn spawn_service_process(
         return Err(anyhow!(error_message));
     }
 
-    let envs = load_environment_for_launch(project, forced_port, public_port.or(project.port))?;
+    let envs =
+        load_environment_for_launch(state, project, forced_port, public_port.or(project.port))
+            .await?;
     emit_log(
         app,
         &project.id,
@@ -1779,6 +1920,33 @@ pub async fn stop_selected(
                 let managed_port = running.public_port.or(project.and_then(|entry| entry.port));
                 request_managed_server_shutdown(&running);
                 if !wait_for_managed_server_shutdown(&running, managed_port).await {
+                    if let Some(project) = project {
+                        emit_log(
+                            &app,
+                            &project_id,
+                            "system",
+                            "Managed server stop timed out, escalating to force stop by port/root path",
+                        );
+                        match force_stop_project(&app, project, Some(&running)).await {
+                            Ok(message) => {
+                                mark_project_stopped(&app, &state, &project_id, message).await?;
+                                continue;
+                            }
+                            Err(error) => {
+                                clear_stop_requested(&state, &project_id).await;
+                                let message = format!("Failed to stop {}: {}", project_name, error);
+                                mark_project_stop_failure(
+                                    &app,
+                                    &state,
+                                    &project_id,
+                                    message.clone(),
+                                )?;
+                                failures.push(message);
+                                continue;
+                            }
+                        }
+                    }
+
                     clear_stop_requested(&state, &project_id).await;
                     let message = managed_server_stop_failure(&project_name, managed_port);
                     mark_project_stop_failure(&app, &state, &project_id, message.clone())?;
@@ -1820,6 +1988,33 @@ pub async fn stop_selected(
                 let managed_port = running.public_port.or(project.and_then(|entry| entry.port));
                 request_managed_server_shutdown(&running);
                 if !wait_for_managed_server_shutdown(&running, managed_port).await {
+                    if let Some(project) = project {
+                        emit_log(
+                            &app,
+                            &project_id,
+                            "system",
+                            "Managed server stop timed out after PID stop, escalating to force stop",
+                        );
+                        match force_stop_project(&app, project, Some(&running)).await {
+                            Ok(message) => {
+                                mark_project_stopped(&app, &state, &project_id, message).await?;
+                                continue;
+                            }
+                            Err(error) => {
+                                clear_stop_requested(&state, &project_id).await;
+                                let message = format!("Failed to stop {}: {}", project_name, error);
+                                mark_project_stop_failure(
+                                    &app,
+                                    &state,
+                                    &project_id,
+                                    message.clone(),
+                                )?;
+                                failures.push(message);
+                                continue;
+                            }
+                        }
+                    }
+
                     clear_stop_requested(&state, &project_id).await;
                     let message = managed_server_stop_failure(&project_name, managed_port);
                     mark_project_stop_failure(&app, &state, &project_id, message.clone())?;
@@ -2000,41 +2195,30 @@ pub async fn force_stop_selected(
             if running.pid.is_none() {
                 let managed_port = running.public_port.or(project.port);
                 if !wait_for_managed_server_shutdown(running, managed_port).await {
-                    clear_stop_requested(&state, &project_id).await;
-                    let message = managed_server_stop_failure(&project.name, managed_port);
+                    emit_log(
+                        &app,
+                        &project_id,
+                        "system",
+                        "Managed server force stop timed out, retrying with PID/port cleanup",
+                    );
+                } else {
+                    clear_runtime_tracking(&state, &project_id).await;
                     db::update_project_status(
                         &state.db_path,
                         &project_id,
-                        ProjectStatus::Failed,
-                        None,
+                        ProjectStatus::Stopped,
+                        Some(0),
                     )?;
                     emit_status(
                         &app,
                         &project_id,
-                        ProjectStatus::Failed,
-                        None,
-                        Some(message.clone()),
+                        ProjectStatus::Stopped,
+                        Some(0),
+                        Some("Managed server force stopped".to_string()),
                     );
-                    emit_log(&app, &project_id, "stderr", message.clone());
-                    failures.push(message);
+                    emit_log(&app, &project_id, "system", "Managed server force stopped");
                     continue;
                 }
-                clear_runtime_tracking(&state, &project_id).await;
-                db::update_project_status(
-                    &state.db_path,
-                    &project_id,
-                    ProjectStatus::Stopped,
-                    Some(0),
-                )?;
-                emit_status(
-                    &app,
-                    &project_id,
-                    ProjectStatus::Stopped,
-                    Some(0),
-                    Some("Managed server force stopped".to_string()),
-                );
-                emit_log(&app, &project_id, "system", "Managed server force stopped");
-                continue;
             }
         }
 

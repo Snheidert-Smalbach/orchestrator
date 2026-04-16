@@ -9,6 +9,7 @@ macro_rules! enum_codec {
         #[serde(rename_all = "snake_case")]
         pub enum $name { $($variant),+ }
 
+        #[allow(dead_code)]
         impl $name {
             pub fn as_str(&self) -> &'static str {
                 match self { $(Self::$variant => $value),+ }
@@ -75,6 +76,20 @@ enum_codec!(MockKind {
     Unknown => "unknown"
 });
 
+enum_codec!(ServiceLinkSource {
+    Manual => "manual",
+    Inferred => "inferred",
+    Unknown => "unknown"
+});
+
+enum_codec!(ServiceGraphEnvSource {
+    EnvFile => "env_file",
+    Override => "override",
+    Linked => "linked",
+    Missing => "missing",
+    Unknown => "unknown"
+});
+
 enum_codec!(ProjectStatus {
     Idle => "idle",
     Starting => "starting",
@@ -124,6 +139,68 @@ pub struct ProjectDependency {
     pub id: String,
     pub depends_on_project_id: String,
     pub required_for_start: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProjectServiceLink {
+    pub id: String,
+    pub source_project_id: String,
+    pub source_env_key: String,
+    pub target_project_id: String,
+    pub target_env_key: Option<String>,
+    pub protocol: String,
+    pub host: String,
+    pub path: String,
+    pub query: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ServiceGraphEnvVariable {
+    pub key: String,
+    pub value: String,
+    pub display_value: String,
+    pub source: ServiceGraphEnvSource,
+    pub enabled: bool,
+    pub is_secret: bool,
+    pub is_url_like: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ServiceGraphProject {
+    pub project_id: String,
+    pub project_name: String,
+    pub status: ProjectStatus,
+    pub launch_mode: LaunchMode,
+    pub configured_port: Option<u16>,
+    pub runtime_port: Option<u16>,
+    pub env_variables: Vec<ServiceGraphEnvVariable>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ServiceGraphConnection {
+    pub id: String,
+    pub source_project_id: String,
+    pub source_env_key: String,
+    pub target_project_id: String,
+    pub target_env_key: Option<String>,
+    pub protocol: String,
+    pub host: String,
+    pub path: String,
+    pub query: String,
+    pub resolved_value: Option<String>,
+    pub source_value: Option<String>,
+    pub link_source: ServiceLinkSource,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ServiceGraphSnapshot {
+    pub projects: Vec<ServiceGraphProject>,
+    pub connections: Vec<ServiceGraphConnection>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -346,5 +423,21 @@ pub struct LogPayload {
     pub project_id: String,
     pub stream: String,
     pub line: String,
+    pub timestamp: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ServiceTrafficEvent {
+    pub id: String,
+    pub source_project_id: Option<String>,
+    pub source_label: Option<String>,
+    pub target_project_id: String,
+    pub method: String,
+    pub path: String,
+    pub status_code: Option<u16>,
+    pub ok: bool,
+    pub duration_ms: Option<u64>,
+    pub error: Option<String>,
     pub timestamp: String,
 }

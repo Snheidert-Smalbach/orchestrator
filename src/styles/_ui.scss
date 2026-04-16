@@ -394,6 +394,14 @@
   width: min(460px, 94vw);
 }
 
+.ui-dialog-content--topology {
+  top: 50%;
+  left: 50%;
+  width: min(1760px, 98vw);
+  max-height: 94vh;
+  transform: translate(-50%, -50%);
+}
+
 .ui-dialog-header {
   display: flex;
   align-items: flex-start;
@@ -443,6 +451,11 @@
 .ui-dialog-body {
   min-height: 0;
   padding: 1rem;
+}
+
+.ui-dialog-body--topology {
+  padding: 0;
+  height: min(84vh, 1080px);
 }
 
 .ui-stat-card {
@@ -713,4 +726,382 @@
   font-size: 0.74rem;
   line-height: 1.5;
   color: rgb(var(--color-text-muted));
+}
+
+.service-topology {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 440px;
+  min-height: 0;
+  height: 100%;
+}
+
+.service-topology__canvas {
+  min-width: 0;
+  min-height: 0;
+  border-right: 1px solid rgb(var(--color-line) / 0.16);
+  background:
+    radial-gradient(circle at top left, rgb(var(--color-accent) / 0.08), transparent 28%),
+    radial-gradient(circle at bottom right, rgb(var(--color-ok) / 0.06), transparent 26%),
+    linear-gradient(180deg, rgb(var(--color-panel) / 0.96), rgb(var(--color-panel-soft) / 0.92));
+}
+
+.service-topology__canvas .react-flow {
+  background: transparent;
+}
+
+.service-topology__canvas .react-flow__pane {
+  cursor: crosshair;
+}
+
+.service-topology__canvas .react-flow__controls,
+.service-topology__canvas .react-flow__minimap {
+  border: 1px solid rgb(var(--color-line) / 0.18);
+  background: rgb(var(--color-panel) / 0.82);
+  box-shadow: 0 24px 40px -34px rgb(var(--shadow-color) / 0.95);
+}
+
+.service-topology__canvas .react-flow__controls-button {
+  border-bottom-color: rgb(var(--color-line) / 0.18);
+  background: rgb(var(--color-panel-soft) / 0.88);
+  color: rgb(var(--color-text-strong));
+}
+
+.service-topology__canvas .react-flow__attribution {
+  display: none;
+}
+
+.service-topology__emptyCanvas {
+  display: flex;
+  height: 100%;
+  align-items: center;
+  justify-content: center;
+  padding: 1.5rem;
+}
+
+.service-topology__sidebar {
+  display: grid;
+  align-content: start;
+  gap: 0.75rem;
+  min-height: 0;
+  overflow: auto;
+  padding: 1rem;
+  background: linear-gradient(
+    180deg,
+    rgb(var(--color-panel-soft) / 0.88),
+    rgb(var(--color-panel) / 0.94)
+  );
+}
+
+.service-topology__sectionHeader {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.service-topology__trafficList {
+  margin-top: 0.7rem;
+  display: grid;
+  gap: 0.45rem;
+}
+
+.service-topology__trafficItem {
+  border: 1px solid rgb(var(--color-line) / 0.16);
+  border-radius: var(--radius-md);
+  padding: 0.58rem 0.72rem;
+  background: rgb(var(--color-panel) / 0.66);
+}
+
+.service-topology__trafficItem.is-error {
+  border-color: rgb(var(--color-danger) / 0.22);
+  background: rgb(var(--color-danger) / 0.08);
+}
+
+.service-topology__trafficRoute {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.service-topology__trafficEndpoint {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: rgb(var(--color-text-strong));
+}
+
+.service-topology__trafficEndpoint.is-target {
+  text-align: left;
+}
+
+.service-topology__trafficArrow {
+  width: 0.78rem;
+  height: 0.78rem;
+  color: rgb(var(--color-text-soft));
+}
+
+.service-topology__trafficDetail {
+  margin-top: 0.28rem;
+  font-size: 0.68rem;
+  color: rgb(var(--color-text-muted));
+}
+
+.service-topology__trafficError {
+  margin-top: 0.22rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.68rem;
+  color: rgb(var(--color-danger));
+}
+
+.service-topology__linkSummary {
+  border: 1px solid rgb(var(--color-line) / 0.18);
+  border-radius: calc(var(--radius-lg) - 4px);
+  padding: 0.8rem 0.9rem;
+  background: rgb(var(--color-panel-soft) / 0.58);
+}
+
+.service-topology__summaryRow {
+  display: grid;
+  gap: 0.25rem;
+}
+
+.service-topology__summaryRow + .service-topology__summaryRow {
+  margin-top: 0.6rem;
+}
+
+.service-topology__summaryLabel {
+  font-size: 0.62rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: rgb(var(--color-text-soft));
+}
+
+.service-topology__summaryValue {
+  font-size: 0.74rem;
+  line-height: 1.5;
+  color: rgb(var(--color-text-strong));
+  word-break: break-word;
+}
+
+.service-topology__panelGrid {
+  display: grid;
+  gap: 0.6rem;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.service-topology__panelGridWide {
+  grid-column: 1 / -1;
+}
+
+.service-topology-node {
+  position: relative;
+  display: block;
+  border: 1px solid rgb(var(--color-line) / 0.18);
+  border-radius: 18px;
+  padding: 0.72rem 0.78rem;
+  background:
+    radial-gradient(circle at top left, rgb(var(--color-accent) / 0.11), transparent 34%),
+    linear-gradient(180deg, rgb(var(--color-panel) / 0.96), rgb(var(--color-panel-soft) / 0.93));
+  color: rgb(var(--color-text-strong));
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 0.05),
+    0 22px 36px -32px rgb(var(--shadow-color) / 0.96);
+}
+
+.service-topology-node--focused {
+  box-shadow:
+    inset 0 0 0 1px rgb(var(--color-accent) / 0.56),
+    0 26px 44px -34px rgb(var(--shadow-color) / 0.96),
+    0 0 0 1px rgb(var(--color-accent) / 0.18);
+}
+
+.service-topology-node--error {
+  border-color: rgb(var(--color-danger) / 0.28);
+  background:
+    radial-gradient(circle at top left, rgb(var(--color-danger) / 0.16), transparent 32%),
+    linear-gradient(180deg, rgb(var(--color-panel) / 0.96), rgb(var(--color-panel-soft) / 0.93));
+}
+
+.service-topology-node__target,
+.service-topology-node__source {
+  width: 10px;
+  height: 10px;
+  border: 2px solid rgb(var(--color-panel));
+  background: rgb(var(--color-accent));
+}
+
+.service-topology-node__compact {
+  display: grid;
+  gap: 0.45rem;
+}
+
+.service-topology-node__compactHeader,
+.service-topology-node__status,
+.service-topology-node__compactHint,
+.service-topology-node__compactPorts {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.service-topology-node__compactHeader {
+  justify-content: space-between;
+}
+
+.service-topology-node__status,
+.service-topology-node__compactHint {
+  font-size: 0.58rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: rgb(var(--color-text-soft));
+}
+
+.service-topology-node__status.is-ready,
+.service-topology-node__status.is-running {
+  color: rgb(var(--color-ok));
+}
+
+.service-topology-node__status.is-failed {
+  color: rgb(var(--color-danger));
+}
+
+.service-topology-node__status.is-starting {
+  color: rgb(var(--color-warn));
+}
+
+.service-topology-node__compactTitle {
+  margin: 0;
+  min-width: 0;
+  font-size: 0.84rem;
+  font-weight: 700;
+  letter-spacing: -0.015em;
+  line-height: 1.3;
+}
+
+.service-topology-node__compactPorts {
+  flex-wrap: wrap;
+}
+
+.service-topology-node__portPill,
+.service-topology-node__modePill {
+  display: inline-flex;
+  align-items: center;
+  min-height: 1.55rem;
+  border: 1px solid rgb(var(--color-line) / 0.18);
+  border-radius: 999px;
+  padding: 0.18rem 0.52rem;
+  font-size: 0.63rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: rgb(var(--color-text-muted));
+  background: rgb(var(--color-panel-soft) / 0.72);
+}
+
+.service-topology-node__modePill {
+  color: rgb(var(--color-accent));
+  border-color: rgb(var(--color-accent) / 0.18);
+  background: rgb(var(--color-accent) / 0.08);
+}
+
+.service-topology__serviceMeta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.service-topology__serviceMeta span {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  border: 1px solid rgb(var(--color-line) / 0.16);
+  border-radius: 999px;
+  padding: 0.35rem 0.7rem;
+  font-size: 0.68rem;
+  color: rgb(var(--color-text-muted));
+  background: rgb(var(--color-panel-soft) / 0.6);
+}
+
+.service-topology__envEditorList {
+  display: grid;
+  gap: 0.65rem;
+  max-height: 22rem;
+  overflow: auto;
+  padding-right: 0.15rem;
+}
+
+.service-topology__envEditorItem {
+  border: 1px solid rgb(var(--color-line) / 0.16);
+  border-radius: 16px;
+  padding: 0.8rem;
+  background: rgb(var(--color-panel-soft) / 0.7);
+}
+
+.service-topology__envEditorHeader {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.service-topology__envEditorKey {
+  margin: 0;
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: rgb(var(--color-text-strong));
+}
+
+.service-topology__envEditorMeta {
+  margin: 0.2rem 0 0;
+  font-size: 0.68rem;
+  color: rgb(var(--color-text-muted));
+}
+
+.service-topology__envEditorControls {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0.55rem;
+  margin-top: 0.75rem;
+}
+
+.service-topology__canvas .react-flow__edge-textbg {
+  fill-opacity: 0.96;
+}
+
+@media (max-width: 1100px) {
+  .service-topology {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: minmax(0, 1fr) auto;
+  }
+
+  .service-topology__canvas {
+    min-height: 28rem;
+    border-right: 0;
+    border-bottom: 1px solid rgb(var(--color-line) / 0.16);
+  }
+
+  .service-topology__sidebar {
+    max-height: 38vh;
+  }
+
+  .service-topology__panelGrid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .service-topology__panelGridWide {
+    grid-column: auto;
+  }
+
+  .service-topology__envEditorControls {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }

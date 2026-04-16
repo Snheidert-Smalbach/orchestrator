@@ -3,12 +3,12 @@ use std::{collections::HashSet, path::Path};
 use anyhow::Result;
 use rusqlite::{params, Connection, OptionalExtension};
 
+use crate::mock_catalog;
 use crate::models::{
     default_root_path, LaunchMode, MockMatchMode, PackageManager, Preset, Project,
-    ProjectDependency, ProjectEnvOverride, ProjectMockSummary, ProjectOrderUpdate, ProjectStatus,
-    ReadinessMode, RunMode, RuntimeKind, Settings, Snapshot,
+    ProjectDependency, ProjectEnvOverride, ProjectMockSummary, ProjectOrderUpdate,
+    ProjectServiceLink, ProjectStatus, ReadinessMode, RunMode, RuntimeKind, Settings, Snapshot,
 };
-use crate::mock_catalog;
 
 fn open_connection(db_path: &Path) -> Result<Connection> {
     let conn = Connection::open(db_path)?;
@@ -217,6 +217,20 @@ pub fn init_db(db_path: &Path) -> Result<()> {
             FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE CASCADE
         );
 
+        CREATE TABLE IF NOT EXISTS project_service_links (
+            id TEXT PRIMARY KEY,
+            source_project_id TEXT NOT NULL,
+            source_env_key TEXT NOT NULL,
+            target_project_id TEXT NOT NULL,
+            target_env_key TEXT,
+            protocol TEXT NOT NULL DEFAULT 'http',
+            host TEXT NOT NULL DEFAULT '127.0.0.1',
+            path TEXT NOT NULL DEFAULT '',
+            query TEXT NOT NULL DEFAULT '',
+            FOREIGN KEY(source_project_id) REFERENCES projects(id) ON DELETE CASCADE,
+            FOREIGN KEY(target_project_id) REFERENCES projects(id) ON DELETE CASCADE
+        );
+
         CREATE TABLE IF NOT EXISTS presets (
             id TEXT PRIMARY KEY,
             name TEXT NOT NULL,
@@ -334,6 +348,137 @@ fn load_dependencies(conn: &Connection, project_id: &str) -> Result<Vec<ProjectD
     Ok(dependencies)
 }
 
+pub fn list_service_links(db_path: &Path) -> Result<Vec<ProjectServiceLink>> {
+    let conn = open_connection(db_path)?;
+    let mut statement = conn.prepare(
+        "SELECT
+            id,
+            source_project_id,
+            source_env_key,
+            target_project_id,
+            target_env_key,
+            protocol,
+            host,
+            path,
+            query
+         FROM project_service_links
+         ORDER BY source_project_id, source_env_key, target_project_id, id",
+    )?;
+    let rows = statement.query_map([], |row| {
+        Ok(ProjectServiceLink {
+            id: row.get(0)?,
+            source_project_id: row.get(1)?,
+            source_env_key: row.get(2)?,
+            target_project_id: row.get(3)?,
+            target_env_key: row.get(4)?,
+            protocol: row.get(5)?,
+            host: row.get(6)?,
+            path: row.get(7)?,
+            query: row.get(8)?,
+        })
+    })?;
+
+    let mut links = Vec::new();
+    for row in rows {
+        links.push(row?);
+    }
+
+    Ok(links)
+}
+
+pub fn list_service_links_for_source(
+    db_path: &Path,
+    source_project_id: &str,
+) -> Result<Vec<ProjectServiceLink>> {
+    let conn = open_connection(db_path)?;
+    let mut statement = conn.prepare(
+        "SELECT
+            id,
+            source_project_id,
+            source_env_key,
+            target_project_id,
+            target_env_key,
+            protocol,
+            host,
+            path,
+            query
+         FROM project_service_links
+         WHERE source_project_id = ?1
+         ORDER BY source_env_key, target_project_id, id",
+    )?;
+    let rows = statement.query_map([source_project_id], |row| {
+        Ok(ProjectServiceLink {
+            id: row.get(0)?,
+            source_project_id: row.get(1)?,
+            source_env_key: row.get(2)?,
+            target_project_id: row.get(3)?,
+            target_env_key: row.get(4)?,
+            protocol: row.get(5)?,
+            host: row.get(6)?,
+            path: row.get(7)?,
+            query: row.get(8)?,
+        })
+    })?;
+
+    let mut links = Vec::new();
+    for row in rows {
+        links.push(row?);
+    }
+
+    Ok(links)
+}
+
+pub fn save_service_link(db_path: &Path, link: &ProjectServiceLink) -> Result<()> {
+    let conn = open_connection(db_path)?;
+    conn.execute(
+        "DELETE FROM project_service_links
+         WHERE source_project_id = ?1
+           AND source_env_key = ?2
+           AND id <> ?3",
+        params![link.source_project_id, link.source_env_key, link.id],
+    )?;
+    conn.execute(
+        "INSERT INTO project_service_links (
+            id,
+            source_project_id,
+            source_env_key,
+            target_project_id,
+            target_env_key,
+            protocol,
+            host,
+            path,
+            query
+         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
+         ON CONFLICT(id) DO UPDATE SET
+            source_project_id = excluded.source_project_id,
+            source_env_key = excluded.source_env_key,
+            target_project_id = excluded.target_project_id,
+            target_env_key = excluded.target_env_key,
+            protocol = excluded.protocol,
+            host = excluded.host,
+            path = excluded.path,
+            query = excluded.query",
+        params![
+            link.id,
+            link.source_project_id,
+            link.source_env_key,
+            link.target_project_id,
+            link.target_env_key,
+            link.protocol,
+            link.host,
+            link.path,
+            link.query
+        ],
+    )?;
+    Ok(())
+}
+
+pub fn delete_service_link(db_path: &Path, link_id: &str) -> Result<()> {
+    let conn = open_connection(db_path)?;
+    conn.execute("DELETE FROM project_service_links WHERE id = ?1", [link_id])?;
+    Ok(())
+}
+
 fn load_preset_project_ids(conn: &Connection, preset_id: &str) -> Result<Vec<String>> {
     let mut statement = conn.prepare(
         "SELECT project_id
@@ -423,8 +568,8 @@ pub fn list_projects(db_path: &Path) -> Result<Vec<Project>> {
         let mut project = row?;
         project.env_overrides = load_env_overrides(&conn, &project.id)?;
         project.dependencies = load_dependencies(&conn, &project.id)?;
-        project.mock_summary = mock_catalog::summarize_project_mocks(db_path, &project.id)
-            .unwrap_or_default();
+        project.mock_summary =
+            mock_catalog::summarize_project_mocks(db_path, &project.id).unwrap_or_default();
         projects.push(project);
     }
 
