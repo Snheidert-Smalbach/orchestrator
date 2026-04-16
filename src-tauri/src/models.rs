@@ -419,6 +419,13 @@ pub struct RuntimeStatusPayload {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct ProjectMockSummaryPayload {
+    pub project_id: String,
+    pub summary: ProjectMockSummary,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct LogPayload {
     pub project_id: String,
     pub stream: String,

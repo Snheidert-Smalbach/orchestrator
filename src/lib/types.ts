@@ -229,6 +229,11 @@ export interface RuntimeStatusPayload {
   message: string | null;
 }
 
+export interface ProjectMockSummaryPayload {
+  projectId: string;
+  summary: ProjectMockSummary;
+}
+
 export interface LogPayload {
   projectId: string;
   stream: "stdout" | "stderr" | "system";

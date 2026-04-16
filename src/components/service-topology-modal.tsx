@@ -24,11 +24,12 @@ import {
   Trash2,
   X,
 } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   deleteServiceLink,
   getServiceGraphSnapshot,
   getSnapshot,
+  listenRuntimeEvents,
   listenServiceTrafficEvents,
   saveProject as saveProjectConfig,
   saveServiceLink,
@@ -102,6 +103,8 @@ type ResolvedTrafficEvent = ServiceTrafficEvent & {
 
 const LIVE_WINDOW_MS = 14000;
 const LIVE_PANEL_EVENTS = 4;
+const TRAFFIC_FLUSH_INTERVAL_MS = 120;
+const TOPOLOGY_REFRESH_DEBOUNCE_MS = 260;
 const DEFAULT_LINK_HOST = "127.0.0.1";
 const DEFAULT_TARGET_ENV_KEY = "PORT";
 const SERVICE_TOPOLOGY_LAYOUT_STORAGE_KEY = "back-orchestrator.service-topology-layout.v1";
@@ -461,6 +464,19 @@ function ServiceTopologySurface({ active, onOpenChange, focusProjectId, shell }:
   const [isLoading, setIsLoading] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const selectedProjectIdRef = useRef<string | null>(focusProjectId ?? null);
+  const selectedConnectionIdRef = useRef<string | null>(null);
+  const pendingTrafficRef = useRef<ServiceTrafficEvent[]>([]);
+  const trafficFlushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const topologyRefreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    selectedProjectIdRef.current = selectedProjectId;
+  }, [selectedProjectId]);
+
+  useEffect(() => {
+    selectedConnectionIdRef.current = selectedConnectionId;
+  }, [selectedConnectionId]);
 
   useEffect(() => {
     if (active) {
@@ -512,13 +528,98 @@ function ServiceTopologySurface({ active, onOpenChange, focusProjectId, shell }:
     }
 
     let dispose: (() => void) | null = null;
+    const flushTraffic = () => {
+      trafficFlushTimerRef.current = null;
+      if (!pendingTrafficRef.current.length) {
+        return;
+      }
+
+      const batch = pendingTrafficRef.current;
+      pendingTrafficRef.current = [];
+      setTrafficEvents((current) => [...current, ...batch].slice(-120));
+    };
+
     void listenServiceTrafficEvents((payload) => {
-      setTrafficEvents((current) => [...current, payload].slice(-120));
+      pendingTrafficRef.current.push(payload);
+      if (trafficFlushTimerRef.current == null) {
+        trafficFlushTimerRef.current = window.setTimeout(flushTraffic, TRAFFIC_FLUSH_INTERVAL_MS);
+      }
     }).then((unlisten) => {
       dispose = unlisten;
     });
 
     return () => {
+      if (trafficFlushTimerRef.current != null) {
+        window.clearTimeout(trafficFlushTimerRef.current);
+        trafficFlushTimerRef.current = null;
+      }
+      pendingTrafficRef.current = [];
+      dispose?.();
+    };
+  }, [active]);
+
+  useEffect(() => {
+    if (!active) {
+      return;
+    }
+
+    let dispose: (() => void) | null = null;
+    const scheduleTopologyRefresh = () => {
+      if (topologyRefreshTimerRef.current != null) {
+        window.clearTimeout(topologyRefreshTimerRef.current);
+      }
+
+      topologyRefreshTimerRef.current = window.setTimeout(() => {
+        topologyRefreshTimerRef.current = null;
+        void reloadTopologyData({
+          preserveConnectionId: selectedConnectionIdRef.current,
+          preserveProjectId: selectedProjectIdRef.current,
+        }).catch(() => {
+          // keep the last good graph visible if the refresh fails
+        });
+      }, TOPOLOGY_REFRESH_DEBOUNCE_MS);
+    };
+
+    void listenRuntimeEvents(
+      (payload) => {
+        setProjects((current) =>
+          current.map((project) =>
+            project.id === payload.projectId
+              ? {
+                  ...project,
+                  status: payload.status,
+                  lastExitCode: payload.exitCode,
+                }
+              : project,
+          ),
+        );
+        setGraphSnapshot((current) =>
+          current
+            ? {
+                ...current,
+                projects: current.projects.map((project) =>
+                  project.projectId === payload.projectId
+                    ? {
+                        ...project,
+                        status: payload.status,
+                      }
+                    : project,
+                ),
+              }
+            : current,
+        );
+        scheduleTopologyRefresh();
+      },
+      () => undefined,
+    ).then((unlisten) => {
+      dispose = unlisten;
+    });
+
+    return () => {
+      if (topologyRefreshTimerRef.current != null) {
+        window.clearTimeout(topologyRefreshTimerRef.current);
+        topologyRefreshTimerRef.current = null;
+      }
       dispose?.();
     };
   }, [active]);
@@ -566,14 +667,18 @@ function ServiceTopologySurface({ active, onOpenChange, focusProjectId, shell }:
       return next;
     });
 
-    setEnvDrafts(
-      graphSnapshot.projects.reduce<Record<string, string>>((accumulator, project) => {
+    setEnvDrafts((current) => {
+      const next = { ...current };
+      graphSnapshot.projects.forEach((project) => {
         project.envVariables.forEach((env) => {
-          accumulator[envDraftKey(project.projectId, env.key)] = env.value;
+          const key = envDraftKey(project.projectId, env.key);
+          if (!(key in next)) {
+            next[key] = env.value;
+          }
         });
-        return accumulator;
-      }, {}),
-    );
+      });
+      return next;
+    });
   }, [graphSnapshot]);
 
   useEffect(() => {
@@ -635,6 +740,21 @@ function ServiceTopologySurface({ active, onOpenChange, focusProjectId, shell }:
     return entries;
   }, [resolvedLiveTraffic]);
 
+  const recentMatchByConnectionId = useMemo(() => {
+    const matches = new Map<string, ResolvedTrafficEvent>();
+
+    for (let index = resolvedLiveTraffic.length - 1; index >= 0; index -= 1) {
+      const event = resolvedLiveTraffic[index];
+      for (const connectionId of event.matchedConnectionIds) {
+        if (!matches.has(connectionId)) {
+          matches.set(connectionId, event);
+        }
+      }
+    }
+
+    return matches;
+  }, [resolvedLiveTraffic]);
+
   const nodes = useMemo<ServiceNode[]>(() => {
     if (!graphSnapshot) {
       return [];
@@ -667,9 +787,7 @@ function ServiceTopologySurface({ active, onOpenChange, focusProjectId, shell }:
     }
 
     return graphSnapshot.connections.map((connection) => {
-      const recentMatch = [...resolvedLiveTraffic]
-        .reverse()
-        .find((event) => event.matchedConnectionIds.includes(connection.id));
+      const recentMatch = recentMatchByConnectionId.get(connection.id);
       const isSelected = selectedConnectionId === connection.id;
       const stroke = recentMatch
         ? recentMatch.ok
@@ -719,9 +837,9 @@ function ServiceTopologySurface({ active, onOpenChange, focusProjectId, shell }:
           opacity: recentMatch ? 1 : 0.92,
           strokeDasharray: connection.linkSource === "inferred" ? "7 5" : undefined,
         },
-      };
-    });
-  }, [graphSnapshot, resolvedLiveTraffic, selectedConnectionId]);
+        };
+      });
+  }, [graphSnapshot, recentMatchByConnectionId, selectedConnectionId]);
 
   const selectedConnection = useMemo(() => {
     return graphSnapshot?.connections.find((connection) => connection.id === selectedConnectionId) ?? null;
@@ -952,6 +1070,7 @@ function ServiceTopologySurface({ active, onOpenChange, focusProjectId, shell }:
               fitView
               minZoom={0.22}
               maxZoom={1.6}
+              onlyRenderVisibleElements
               nodeTypes={nodeTypes}
               nodes={nodes}
               edges={edges}

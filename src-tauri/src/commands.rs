@@ -2,8 +2,8 @@ use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager, State, WebviewUrl, WebviewWindowBuilder};
 
 use crate::models::{
-    Preset, Project, ProjectMock, ProjectMockCollection, ProjectOrderUpdate, ProjectServiceLink,
-    ServiceGraphSnapshot, Snapshot, SystemDiagnostics,
+    Preset, Project, ProjectMock, ProjectMockCollection, ProjectMockSummaryPayload,
+    ProjectOrderUpdate, ProjectServiceLink, ServiceGraphSnapshot, Snapshot, SystemDiagnostics,
 };
 use crate::{db, diagnostics, mock_catalog, runtime, scanner, service_graph, AppState};
 
@@ -17,6 +17,20 @@ struct ServiceTopologyFocusPayload {
 
 fn map_error<T>(result: anyhow::Result<T>) -> Result<T, String> {
     result.map_err(|error| error.to_string())
+}
+
+fn emit_project_mock_summary(
+    app: &AppHandle,
+    project_id: &str,
+    summary: crate::models::ProjectMockSummary,
+) {
+    let _ = app.emit(
+        "project-mock-summary",
+        ProjectMockSummaryPayload {
+            project_id: project_id.to_string(),
+            summary,
+        },
+    );
 }
 
 #[tauri::command]
@@ -187,28 +201,44 @@ pub fn get_project_mocks(
 
 #[tauri::command]
 pub fn save_project_mock(
+    app: AppHandle,
     project_id: String,
     mock: ProjectMock,
     state: State<'_, AppState>,
 ) -> Result<ProjectMockCollection, String> {
-    map_error(mock_catalog::save_project_mock(
+    let collection = map_error(mock_catalog::save_project_mock(
         &state.db_path,
         &project_id,
         mock,
-    ))
+    ))?;
+    map_error(db::update_project_mock_summary(
+        &state.db_path,
+        &project_id,
+        &collection.summary,
+    ))?;
+    emit_project_mock_summary(&app, &project_id, collection.summary.clone());
+    Ok(collection)
 }
 
 #[tauri::command]
 pub fn delete_project_mock(
+    app: AppHandle,
     project_id: String,
     mock_id: String,
     state: State<'_, AppState>,
 ) -> Result<ProjectMockCollection, String> {
-    map_error(mock_catalog::delete_project_mock(
+    let collection = map_error(mock_catalog::delete_project_mock(
         &state.db_path,
         &project_id,
         &mock_id,
-    ))
+    ))?;
+    map_error(db::update_project_mock_summary(
+        &state.db_path,
+        &project_id,
+        &collection.summary,
+    ))?;
+    emit_project_mock_summary(&app, &project_id, collection.summary.clone());
+    Ok(collection)
 }
 
 #[tauri::command]

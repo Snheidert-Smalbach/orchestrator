@@ -8,6 +8,7 @@ import {
   getSnapshot,
   importDetectedProjects,
   importSingleProject,
+  listenProjectMockSummaryEvents,
   listenRuntimeEvents,
   reorderProjects as reorderProjectsInBackend,
   savePreset,
@@ -39,6 +40,8 @@ let flushQueuedLogs: (() => void) | null = null;
 let queuedLogTimer: ReturnType<typeof setTimeout> | null = null;
 let runtimeEventsUnlisten: (() => void) | null = null;
 let runtimeEventsPromise: Promise<void> | null = null;
+let mockSummaryEventsUnlisten: (() => void) | null = null;
+let mockSummaryEventsPromise: Promise<void> | null = null;
 
 interface AppStore {
   settings: Settings;
@@ -276,6 +279,27 @@ function ensureRuntimeSubscriptions(getStore: () => AppStore) {
   return runtimeEventsPromise;
 }
 
+function ensureMockSummarySubscriptions(getStore: () => AppStore) {
+  if (mockSummaryEventsUnlisten) {
+    return Promise.resolve();
+  }
+
+  if (!mockSummaryEventsPromise) {
+    mockSummaryEventsPromise = listenProjectMockSummaryEvents((payload) => {
+      getStore().patchProjectMockSummary(payload.projectId, payload.summary);
+    })
+      .then((unlisten) => {
+        mockSummaryEventsUnlisten = unlisten;
+      })
+      .catch((error) => {
+        mockSummaryEventsPromise = null;
+        throw error;
+      });
+  }
+
+  return mockSummaryEventsPromise;
+}
+
 export const useAppStore = create<AppStore>((set, get) => ({
   settings: defaultSettings,
   projects: [],
@@ -326,7 +350,10 @@ export const useAppStore = create<AppStore>((set, get) => ({
     set({ isLoading: true, error: null });
     try {
       if (!get().subscriptionsReady) {
-        await ensureRuntimeSubscriptions(get);
+        await Promise.all([
+          ensureRuntimeSubscriptions(get),
+          ensureMockSummarySubscriptions(get),
+        ]);
         if (!get().subscriptionsReady) {
           set({ subscriptionsReady: true });
         }

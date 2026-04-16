@@ -6,6 +6,7 @@ import type {
   ProjectMock,
   ProjectMockCollection,
   ProjectMockSummary,
+  ProjectMockSummaryPayload,
   ProjectServiceLink,
   ProcessDiagnostic,
   Preset,
@@ -29,6 +30,7 @@ const SERVICE_TOPOLOGY_WINDOW_LABEL = "service-topology-window";
 
 const statusListeners = new Set<(payload: RuntimeStatusPayload) => void>();
 const logListeners = new Set<(payload: LogPayload) => void>();
+const mockSummaryListeners = new Set<(payload: ProjectMockSummaryPayload) => void>();
 const trafficListeners = new Set<(payload: ServiceTrafficEvent) => void>();
 
 function detectClientOs() {
@@ -526,6 +528,12 @@ function emitStatus(payload: RuntimeStatusPayload) {
 
 function emitLog(payload: LogPayload) {
   for (const listener of logListeners) {
+    listener(payload);
+  }
+}
+
+function emitProjectMockSummary(payload: ProjectMockSummaryPayload) {
+  for (const listener of mockSummaryListeners) {
     listener(payload);
   }
 }
@@ -1064,10 +1072,12 @@ export async function saveProjectMock(projectId: string, mock: ProjectMock) {
     ? current.mocks.map((entry) => (entry.id === nextMock.id ? nextMock : entry))
     : [...current.mocks, nextMock];
 
-  return saveMockRegistry(projectId, {
+  const collection = saveMockRegistry(projectId, {
     summary: buildMockSummary(nextMocks),
     mocks: nextMocks,
   });
+  emitProjectMockSummary({ projectId, summary: collection.summary });
+  return collection;
 }
 
 export async function deleteProjectMock(projectId: string, mockId: string) {
@@ -1078,10 +1088,12 @@ export async function deleteProjectMock(projectId: string, mockId: string) {
 
   const current = readMockRegistry(projectId);
   const nextMocks = current.mocks.filter((mock) => mock.id !== mockId);
-  return saveMockRegistry(projectId, {
+  const collection = saveMockRegistry(projectId, {
     summary: buildMockSummary(nextMocks),
     mocks: nextMocks,
   });
+  emitProjectMockSummary({ projectId, summary: collection.summary });
+  return collection;
 }
 
 export async function listenRuntimeEvents(
@@ -1108,6 +1120,26 @@ export async function listenRuntimeEvents(
   return () => {
     statusListeners.delete(onStatus);
     logListeners.delete(onLog);
+  };
+}
+
+export async function listenProjectMockSummaryEvents(
+  onSummary: (payload: ProjectMockSummaryPayload) => void,
+) {
+  if (isTauriRuntime()) {
+    const unlistenSummary = await listen<ProjectMockSummaryPayload>("project-mock-summary", (event) => {
+      onSummary(event.payload);
+    });
+
+    return () => {
+      unlistenSummary();
+    };
+  }
+
+  mockSummaryListeners.add(onSummary);
+
+  return () => {
+    mockSummaryListeners.delete(onSummary);
   };
 }
 

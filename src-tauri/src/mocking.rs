@@ -3,26 +3,27 @@ use std::{
     fs::{self, OpenOptions},
     io::Write,
     path::{Path, PathBuf},
-    sync::{Arc, Mutex, OnceLock},
+    sync::{
+        mpsc::{self, Sender},
+        Arc, Mutex, OnceLock,
+    },
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
 use anyhow::{anyhow, Context, Result};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
-use tauri::{AppHandle, Emitter, Manager};
+use tauri::{AppHandle, Emitter};
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::{TcpListener, TcpStream},
-    process::Command,
     sync::watch,
     time::timeout,
 };
 
 use crate::{
     db,
-    models::{MockMatchMode, Project, ServiceTrafficEvent},
-    AppState,
+    models::{MockMatchMode, Project, ProjectMockSummaryPayload, ServiceTrafficEvent},
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -96,15 +97,16 @@ struct HttpResponseMessage {
     body: Vec<u8>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
-struct ProcessParentSnapshot {
-    #[serde(rename = "ProcessId")]
-    process_id: u32,
-    #[serde(rename = "ParentProcessId")]
-    parent_process_id: Option<u32>,
-}
-
 static CAPTURE_APPEND_LOCKS: OnceLock<Mutex<HashMap<PathBuf, Arc<Mutex<()>>>>> = OnceLock::new();
+static CAPTURE_PERSIST_TX: OnceLock<Sender<CapturePersistJob>> = OnceLock::new();
+
+#[derive(Debug)]
+struct CapturePersistJob {
+    app: AppHandle,
+    db_path: PathBuf,
+    project_id: String,
+    exchange: RecordedExchange,
+}
 
 #[derive(Debug, Clone)]
 pub struct ManagedServerHandle {
@@ -167,140 +169,82 @@ fn emit_traffic(app: &AppHandle, payload: ServiceTrafficEvent) {
     let _ = app.emit("service-traffic", payload);
 }
 
-fn parse_remote_port(remote_address: &str) -> Option<u16> {
-    remote_address
-        .rsplit_once(':')
-        .and_then(|(_, port)| port.parse::<u16>().ok())
-}
-
-async fn lookup_source_pid(remote_port: u16, target_port: u16) -> Option<u32> {
-    if !cfg!(windows) {
-        return None;
-    }
-
-    let script = format!(
-        "Get-NetTCPConnection -LocalPort {remote_port} -RemotePort {target_port} -ErrorAction SilentlyContinue | Select-Object -First 1 -ExpandProperty OwningProcess"
+fn emit_project_mock_summary(
+    app: &AppHandle,
+    project_id: &str,
+    summary: crate::models::ProjectMockSummary,
+) {
+    let _ = app.emit(
+        "project-mock-summary",
+        ProjectMockSummaryPayload {
+            project_id: project_id.to_string(),
+            summary,
+        },
     );
-
-    let output = Command::new("powershell.exe")
-        .arg("-NoProfile")
-        .arg("-Command")
-        .arg(script)
-        .output()
-        .await
-        .ok()?;
-
-    if !output.status.success() {
-        return None;
-    }
-
-    String::from_utf8_lossy(&output.stdout)
-        .split_whitespace()
-        .find_map(|token| token.trim().parse::<u32>().ok())
 }
 
-async fn collect_process_parent_map() -> Option<HashMap<u32, Option<u32>>> {
-    if !cfg!(windows) {
-        return None;
-    }
+fn persist_capture_job(job: CapturePersistJob) -> Result<()> {
+    let result = (|| -> Result<_> {
+        append_exchange(&job.db_path, &job.project_id, &job.exchange)?;
+        db::append_captured_mock_summary(
+            &job.db_path,
+            &job.project_id,
+            &job.exchange.request.path,
+            &job.exchange.recorded_at,
+            matches!(job.exchange.kind, TrafficKind::Graphql),
+        )
+    })();
 
-    let script = "Get-CimInstance Win32_Process | Select-Object ProcessId, ParentProcessId | ConvertTo-Json -Depth 3 -Compress";
-    let output = Command::new("powershell.exe")
-        .arg("-NoProfile")
-        .arg("-Command")
-        .arg(script)
-        .output()
-        .await
-        .ok()?;
-
-    if !output.status.success() {
-        return None;
-    }
-
-    let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
-    if stdout.is_empty() {
-        return None;
-    }
-
-    let snapshots = serde_json::from_str::<Vec<ProcessParentSnapshot>>(&stdout)
-        .or_else(|_| serde_json::from_str::<ProcessParentSnapshot>(&stdout).map(|item| vec![item]))
-        .ok()?;
-
-    Some(
-        snapshots
-            .into_iter()
-            .map(|item| (item.process_id, item.parent_process_id))
-            .collect(),
-    )
-}
-
-async fn resolve_project_id_for_pid(app: &AppHandle, pid: u32) -> Option<String> {
-    let state = app.state::<AppState>().inner().clone();
-    let tracked_roots = {
-        let runtime = state.runtime.lock().await;
-        runtime
-            .running
-            .iter()
-            .filter_map(|(project_id, entry)| {
-                entry
-                    .pid
-                    .map(|tracked_pid| (tracked_pid, project_id.clone()))
-            })
-            .collect::<HashMap<_, _>>()
-    };
-
-    if let Some(project_id) = tracked_roots.get(&pid) {
-        return Some(project_id.clone());
-    }
-
-    let parent_map = collect_process_parent_map().await?;
-    let mut current_pid = Some(pid);
-    for _ in 0..40 {
-        let current = current_pid?;
-        if let Some(project_id) = tracked_roots.get(&current) {
-            return Some(project_id.clone());
+    match result {
+        Ok(summary) => {
+            emit_project_mock_summary(&job.app, &job.project_id, summary);
+            Ok(())
         }
-        current_pid = parent_map.get(&current).copied().flatten();
+        Err(error) => {
+            emit_log(
+                &job.app,
+                &job.project_id,
+                "stderr",
+                format!("Failed to persist recorded exchange: {error}"),
+            );
+            Err(error)
+        }
     }
-
-    None
 }
 
-async fn resolve_source_project(
-    app: &AppHandle,
-    remote_address: &str,
-    target_port: u16,
-) -> Option<String> {
-    let remote_port = parse_remote_port(remote_address)?;
-    let source_pid = lookup_source_pid(remote_port, target_port).await?;
-    resolve_project_id_for_pid(app, source_pid).await
+fn capture_persist_sender() -> &'static Sender<CapturePersistJob> {
+    CAPTURE_PERSIST_TX.get_or_init(|| {
+        let (tx, rx) = mpsc::channel::<CapturePersistJob>();
+        let _ = std::thread::Builder::new()
+            .name("orchestrator-capture-persist".to_string())
+            .spawn(move || {
+                while let Ok(job) = rx.recv() {
+                    if let Err(error) = persist_capture_job(job) {
+                        eprintln!("capture persistence failed: {error}");
+                    }
+                }
+            });
+        tx
+    })
 }
 
-async fn resolve_source_label(
-    app: &AppHandle,
-    source_project_id: Option<&String>,
-    remote_address: &str,
-) -> Option<String> {
-    let Some(project_id) = source_project_id else {
-        return Some(remote_address.to_string());
+fn queue_capture_persist(
+    app: AppHandle,
+    db_path: PathBuf,
+    project_id: String,
+    exchange: RecordedExchange,
+) -> Result<()> {
+    let job = CapturePersistJob {
+        app,
+        db_path,
+        project_id,
+        exchange,
     };
-    let state = app.state::<AppState>().inner().clone();
-    let projects = db::list_projects(&state.db_path).ok()?;
-    projects
-        .into_iter()
-        .find(|project| &project.id == project_id)
-        .map(|project| project.name)
-        .or_else(|| Some(remote_address.to_string()))
-}
 
-async fn resolve_traffic_source(
-    app: &AppHandle,
-    remote_address: &str,
-    target_port: u16,
-) -> (Option<String>, Option<String>) {
-    let source_project_id = resolve_source_project(app, remote_address, target_port).await;
-    let source_label = resolve_source_label(app, source_project_id.as_ref(), remote_address).await;
-    (source_project_id, source_label)
+    match capture_persist_sender().send(job) {
+        Ok(()) => Ok(()),
+        Err(error) => persist_capture_job(error.0),
+    }
 }
 
 async fn emit_request_traffic(
@@ -406,7 +350,6 @@ pub async fn start_recording_proxy(
                             project,
                             socket,
                             address.to_string(),
-                            public_port,
                             upstream_port,
                         )
                         .await
@@ -480,7 +423,6 @@ pub async fn start_mock_server(
                             project,
                             socket,
                             address.to_string(),
-                            public_port,
                         )
                         .await
                         {
@@ -506,12 +448,9 @@ async fn handle_proxy_connection(
     project: Project,
     mut socket: TcpStream,
     remote_address: String,
-    public_port: u16,
     upstream_port: u16,
 ) -> Result<()> {
     let started_at = Instant::now();
-    let (source_project_id, source_label) =
-        resolve_traffic_source(&app, &remote_address, public_port).await;
     let request = read_http_request(&mut socket).await?;
     let (request_path, _) = split_target(&request.target);
     emit_log(
@@ -531,8 +470,8 @@ async fn handle_proxy_connection(
             emit_request_traffic(
                 &app,
                 &project,
-                source_project_id.clone(),
-                source_label.clone(),
+                None,
+                Some(remote_address.clone()),
                 &request.method,
                 &request_path,
                 Some(502),
@@ -559,8 +498,8 @@ async fn handle_proxy_connection(
             emit_request_traffic(
                 &app,
                 &project,
-                source_project_id.clone(),
-                source_label.clone(),
+                None,
+                Some(remote_address.clone()),
                 &request.method,
                 &request_path,
                 None,
@@ -572,7 +511,11 @@ async fn handle_proxy_connection(
         }
     };
     let exchange = build_exchange(&request, &response);
-    append_exchange(&db_path, &project.id, &exchange)?;
+    let response_payload = serialize_response(&response);
+    socket.write_all(&response_payload).await?;
+    socket.flush().await?;
+    let _ = socket.shutdown().await;
+    queue_capture_persist(app.clone(), db_path, project.id.clone(), exchange.clone())?;
     emit_log(
         &app,
         &project.id,
@@ -588,8 +531,8 @@ async fn handle_proxy_connection(
     emit_request_traffic(
         &app,
         &project,
-        source_project_id.clone(),
-        source_label.clone(),
+        None,
+        Some(remote_address),
         &request.method,
         &request_path,
         Some(response.status_code),
@@ -597,11 +540,6 @@ async fn handle_proxy_connection(
         Some(started_at.elapsed().as_millis() as u64),
     )
     .await;
-
-    let response_payload = serialize_response(&response);
-    socket.write_all(&response_payload).await?;
-    socket.flush().await?;
-    let _ = socket.shutdown().await;
     Ok(())
 }
 
@@ -611,11 +549,8 @@ async fn handle_mock_connection(
     project: Project,
     mut socket: TcpStream,
     remote_address: String,
-    public_port: u16,
 ) -> Result<()> {
     let started_at = Instant::now();
-    let (source_project_id, source_label) =
-        resolve_traffic_source(&app, &remote_address, public_port).await;
     let request = read_http_request(&mut socket).await?;
     let request_view = build_request_record(&request);
     let RegistryLoad { entries, warnings } = load_registry(&db_path, &project.id)?;
@@ -651,11 +586,15 @@ async fn handle_mock_connection(
         );
         build_unmatched_response(&project, &request_view)
     };
+    let payload = serialize_response(&response);
+    socket.write_all(&payload).await?;
+    socket.flush().await?;
+    let _ = socket.shutdown().await;
     emit_request_traffic(
         &app,
         &project,
-        source_project_id,
-        source_label,
+        None,
+        Some(remote_address),
         &request.method,
         &request_view.path,
         Some(response.status_code),
@@ -670,11 +609,6 @@ async fn handle_mock_connection(
         Some(started_at.elapsed().as_millis() as u64),
     )
     .await;
-
-    let payload = serialize_response(&response);
-    socket.write_all(&payload).await?;
-    socket.flush().await?;
-    let _ = socket.shutdown().await;
     Ok(())
 }
 

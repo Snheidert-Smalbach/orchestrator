@@ -1,4 +1,7 @@
-use std::{collections::HashSet, path::Path};
+use std::{
+    collections::{HashMap, HashSet},
+    path::Path,
+};
 
 use anyhow::Result;
 use rusqlite::{params, Connection, OptionalExtension};
@@ -12,7 +15,13 @@ use crate::models::{
 
 fn open_connection(db_path: &Path) -> Result<Connection> {
     let conn = Connection::open(db_path)?;
-    conn.execute_batch("PRAGMA foreign_keys = ON;")?;
+    conn.execute_batch(
+        "
+        PRAGMA foreign_keys = ON;
+        PRAGMA journal_mode = WAL;
+        PRAGMA synchronous = NORMAL;
+        ",
+    )?;
     Ok(conn)
 }
 
@@ -51,8 +60,9 @@ fn backfill_catalog_order(conn: &Connection) -> Result<()> {
     Ok(())
 }
 
-fn ensure_project_columns(conn: &Connection) -> Result<()> {
+fn ensure_project_columns(conn: &Connection) -> Result<bool> {
     let columns = load_project_columns(conn)?;
+    let mut needs_mock_summary_backfill = false;
 
     if !columns.contains("catalog_order") {
         conn.execute(
@@ -90,6 +100,62 @@ fn ensure_project_columns(conn: &Connection) -> Result<()> {
         )?;
     }
 
+    if !columns.contains("mock_total_count") {
+        conn.execute(
+            "ALTER TABLE projects ADD COLUMN mock_total_count INTEGER NOT NULL DEFAULT 0",
+            [],
+        )?;
+        needs_mock_summary_backfill = true;
+    }
+
+    if !columns.contains("mock_graphql_count") {
+        conn.execute(
+            "ALTER TABLE projects ADD COLUMN mock_graphql_count INTEGER NOT NULL DEFAULT 0",
+            [],
+        )?;
+        needs_mock_summary_backfill = true;
+    }
+
+    if !columns.contains("mock_rest_count") {
+        conn.execute(
+            "ALTER TABLE projects ADD COLUMN mock_rest_count INTEGER NOT NULL DEFAULT 0",
+            [],
+        )?;
+        needs_mock_summary_backfill = true;
+    }
+
+    if !columns.contains("mock_manual_count") {
+        conn.execute(
+            "ALTER TABLE projects ADD COLUMN mock_manual_count INTEGER NOT NULL DEFAULT 0",
+            [],
+        )?;
+        needs_mock_summary_backfill = true;
+    }
+
+    if !columns.contains("mock_captured_count") {
+        conn.execute(
+            "ALTER TABLE projects ADD COLUMN mock_captured_count INTEGER NOT NULL DEFAULT 0",
+            [],
+        )?;
+        needs_mock_summary_backfill = true;
+    }
+
+    if !columns.contains("mock_last_updated_at") {
+        conn.execute(
+            "ALTER TABLE projects ADD COLUMN mock_last_updated_at TEXT",
+            [],
+        )?;
+        needs_mock_summary_backfill = true;
+    }
+
+    if !columns.contains("mock_routes_json") {
+        conn.execute(
+            "ALTER TABLE projects ADD COLUMN mock_routes_json TEXT NOT NULL DEFAULT '[]'",
+            [],
+        )?;
+        needs_mock_summary_backfill = true;
+    }
+
     let has_unordered_projects = conn.query_row(
         "SELECT EXISTS(
             SELECT 1
@@ -104,6 +170,116 @@ fn ensure_project_columns(conn: &Connection) -> Result<()> {
         backfill_catalog_order(conn)?;
     }
 
+    Ok(needs_mock_summary_backfill)
+}
+
+fn compare_summary_timestamps(left: &str, right: &str) -> std::cmp::Ordering {
+    match (left.parse::<u128>(), right.parse::<u128>()) {
+        (Ok(left), Ok(right)) => left.cmp(&right),
+        _ => left.cmp(right),
+    }
+}
+
+fn save_project_mock_summary_with_conn(
+    conn: &Connection,
+    project_id: &str,
+    summary: &ProjectMockSummary,
+) -> Result<()> {
+    conn.execute(
+        "UPDATE projects
+         SET mock_total_count = ?1,
+             mock_graphql_count = ?2,
+             mock_rest_count = ?3,
+             mock_manual_count = ?4,
+             mock_captured_count = ?5,
+             mock_last_updated_at = ?6,
+             mock_routes_json = ?7
+         WHERE id = ?8",
+        params![
+            summary.total_count as i64,
+            summary.graphql_count as i64,
+            summary.rest_count as i64,
+            summary.manual_count as i64,
+            summary.captured_count as i64,
+            summary.last_updated_at.clone(),
+            serde_json::to_string(&summary.routes)?,
+            project_id
+        ],
+    )?;
+    Ok(())
+}
+
+fn load_project_mock_summary_from_conn(
+    conn: &Connection,
+    project_id: &str,
+) -> Result<ProjectMockSummary> {
+    Ok(conn
+        .query_row(
+            "SELECT
+                mock_total_count,
+                mock_graphql_count,
+                mock_rest_count,
+                mock_manual_count,
+                mock_captured_count,
+                mock_last_updated_at,
+                mock_routes_json
+             FROM projects
+             WHERE id = ?1",
+            [project_id],
+            |row| {
+                let routes_json: String = row.get(6)?;
+                Ok(ProjectMockSummary {
+                    total_count: row.get::<_, i64>(0)? as usize,
+                    graphql_count: row.get::<_, i64>(1)? as usize,
+                    rest_count: row.get::<_, i64>(2)? as usize,
+                    manual_count: row.get::<_, i64>(3)? as usize,
+                    captured_count: row.get::<_, i64>(4)? as usize,
+                    last_updated_at: row.get(5)?,
+                    routes: serde_json::from_str(&routes_json).unwrap_or_default(),
+                })
+            },
+        )
+        .optional()?
+        .unwrap_or_default())
+}
+
+fn load_mock_summary_cache_version(conn: &Connection) -> Result<Option<String>> {
+    conn.query_row(
+        "SELECT value FROM app_settings WHERE key = 'mock_summary_cache_version'",
+        [],
+        |row| row.get::<_, String>(0),
+    )
+    .optional()
+    .map_err(Into::into)
+}
+
+fn save_mock_summary_cache_version(conn: &Connection, version: &str) -> Result<()> {
+    conn.execute(
+        "INSERT INTO app_settings (key, value) VALUES ('mock_summary_cache_version', ?1)
+         ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+        [version],
+    )?;
+    Ok(())
+}
+
+fn backfill_project_mock_summaries(db_path: &Path) -> Result<()> {
+    let conn = open_connection(db_path)?;
+    let mut statement =
+        conn.prepare("SELECT id FROM projects ORDER BY catalog_order, startup_phase, name")?;
+    let rows = statement.query_map([], |row| row.get::<_, String>(0))?;
+    let mut project_ids = Vec::new();
+
+    for row in rows {
+        project_ids.push(row?);
+    }
+
+    for project_id in project_ids {
+        let summary =
+            mock_catalog::summarize_project_mocks(db_path, &project_id).unwrap_or_default();
+        save_project_mock_summary_with_conn(&conn, &project_id, &summary)?;
+    }
+
+    save_mock_summary_cache_version(&conn, "1")?;
     Ok(())
 }
 
@@ -248,7 +424,25 @@ pub fn init_db(db_path: &Path) -> Result<()> {
         );
         ",
     )?;
-    ensure_project_columns(&conn)?;
+    let needs_mock_summary_backfill = ensure_project_columns(&conn)?;
+    let mock_summary_cache_version = load_mock_summary_cache_version(&conn)?;
+
+    if needs_mock_summary_backfill || mock_summary_cache_version.as_deref() != Some("1") {
+        drop(conn);
+        backfill_project_mock_summaries(db_path)?;
+        let conn = open_connection(db_path)?;
+        let has_default_roots = conn.query_row(
+            "SELECT EXISTS(SELECT 1 FROM app_settings WHERE key = 'default_roots')",
+            [],
+            |row| row.get::<_, i64>(0),
+        )? == 1;
+
+        if !has_default_roots {
+            save_default_root(db_path, &default_root_path())?;
+        }
+
+        return Ok(());
+    }
 
     let has_default_roots = conn.query_row(
         "SELECT EXISTS(SELECT 1 FROM app_settings WHERE key = 'default_roots')",
@@ -302,50 +496,58 @@ pub fn list_project_root_paths(db_path: &Path) -> Result<HashSet<String>> {
     Ok(roots)
 }
 
-fn load_env_overrides(conn: &Connection, project_id: &str) -> Result<Vec<ProjectEnvOverride>> {
+fn load_all_env_overrides(conn: &Connection) -> Result<HashMap<String, Vec<ProjectEnvOverride>>> {
     let mut statement = conn.prepare(
-        "SELECT id, key, value, is_secret, enabled
+        "SELECT project_id, id, key, value, is_secret, enabled
          FROM project_env_overrides
-         WHERE project_id = ?1
-         ORDER BY key",
+         ORDER BY project_id, key",
     )?;
-    let rows = statement.query_map([project_id], |row| {
-        Ok(ProjectEnvOverride {
-            id: row.get(0)?,
-            key: row.get(1)?,
-            value: row.get(2)?,
-            is_secret: row.get::<_, i64>(3)? == 1,
-            enabled: row.get::<_, i64>(4)? == 1,
-        })
+    let rows = statement.query_map([], |row| {
+        Ok((
+            row.get::<_, String>(0)?,
+            ProjectEnvOverride {
+                id: row.get(1)?,
+                key: row.get(2)?,
+                value: row.get(3)?,
+                is_secret: row.get::<_, i64>(4)? == 1,
+                enabled: row.get::<_, i64>(5)? == 1,
+            },
+        ))
     })?;
+    let mut grouped = HashMap::<String, Vec<ProjectEnvOverride>>::new();
 
-    let mut overrides = Vec::new();
     for row in rows {
-        overrides.push(row?);
+        let (project_id, override_entry) = row?;
+        grouped.entry(project_id).or_default().push(override_entry);
     }
-    Ok(overrides)
+
+    Ok(grouped)
 }
 
-fn load_dependencies(conn: &Connection, project_id: &str) -> Result<Vec<ProjectDependency>> {
+fn load_all_dependencies(conn: &Connection) -> Result<HashMap<String, Vec<ProjectDependency>>> {
     let mut statement = conn.prepare(
-        "SELECT id, depends_on_project_id, required_for_start
+        "SELECT project_id, id, depends_on_project_id, required_for_start
          FROM project_dependencies
-         WHERE project_id = ?1
-         ORDER BY depends_on_project_id",
+         ORDER BY project_id, depends_on_project_id",
     )?;
-    let rows = statement.query_map([project_id], |row| {
-        Ok(ProjectDependency {
-            id: row.get(0)?,
-            depends_on_project_id: row.get(1)?,
-            required_for_start: row.get::<_, i64>(2)? == 1,
-        })
+    let rows = statement.query_map([], |row| {
+        Ok((
+            row.get::<_, String>(0)?,
+            ProjectDependency {
+                id: row.get(1)?,
+                depends_on_project_id: row.get(2)?,
+                required_for_start: row.get::<_, i64>(3)? == 1,
+            },
+        ))
     })?;
+    let mut grouped = HashMap::<String, Vec<ProjectDependency>>::new();
 
-    let mut dependencies = Vec::new();
     for row in rows {
-        dependencies.push(row?);
+        let (project_id, dependency) = row?;
+        grouped.entry(project_id).or_default().push(dependency);
     }
-    Ok(dependencies)
+
+    Ok(grouped)
 }
 
 pub fn list_service_links(db_path: &Path) -> Result<Vec<ProjectServiceLink>> {
@@ -522,6 +724,13 @@ pub fn list_projects(db_path: &Path) -> Result<Vec<Project>> {
             wait_for_previous_ready,
             enabled,
             tags_json,
+            mock_total_count,
+            mock_graphql_count,
+            mock_rest_count,
+            mock_manual_count,
+            mock_captured_count,
+            mock_last_updated_at,
+            mock_routes_json,
             last_status,
             last_exit_code
          FROM projects
@@ -532,6 +741,7 @@ pub fn list_projects(db_path: &Path) -> Result<Vec<Project>> {
         let available_env_files: String = row.get(9)?;
         let available_scripts: String = row.get(10)?;
         let tags_json: String = row.get(21)?;
+        let mock_routes_json: String = row.get(28)?;
         Ok(Project {
             id: row.get(0)?,
             name: row.get(1)?,
@@ -555,21 +765,35 @@ pub fn list_projects(db_path: &Path) -> Result<Vec<Project>> {
             wait_for_previous_ready: row.get::<_, i64>(19)? == 1,
             enabled: row.get::<_, i64>(20)? == 1,
             tags: serde_json::from_str(&tags_json).unwrap_or_default(),
-            mock_summary: ProjectMockSummary::default(),
+            mock_summary: ProjectMockSummary {
+                total_count: row.get::<_, i64>(22)? as usize,
+                graphql_count: row.get::<_, i64>(23)? as usize,
+                rest_count: row.get::<_, i64>(24)? as usize,
+                manual_count: row.get::<_, i64>(25)? as usize,
+                captured_count: row.get::<_, i64>(26)? as usize,
+                last_updated_at: row.get(27)?,
+                routes: serde_json::from_str(&mock_routes_json).unwrap_or_default(),
+            },
             env_overrides: Vec::new(),
             dependencies: Vec::new(),
-            status: ProjectStatus::from_db(&row.get::<_, String>(22)?),
-            last_exit_code: row.get(23)?,
+            status: ProjectStatus::from_db(&row.get::<_, String>(29)?),
+            last_exit_code: row.get(30)?,
         })
     })?;
 
+    let env_overrides_by_project = load_all_env_overrides(&conn)?;
+    let dependencies_by_project = load_all_dependencies(&conn)?;
     let mut projects = Vec::new();
     for row in rows {
         let mut project = row?;
-        project.env_overrides = load_env_overrides(&conn, &project.id)?;
-        project.dependencies = load_dependencies(&conn, &project.id)?;
-        project.mock_summary =
-            mock_catalog::summarize_project_mocks(db_path, &project.id).unwrap_or_default();
+        project.env_overrides = env_overrides_by_project
+            .get(&project.id)
+            .cloned()
+            .unwrap_or_default();
+        project.dependencies = dependencies_by_project
+            .get(&project.id)
+            .cloned()
+            .unwrap_or_default();
         projects.push(project);
     }
 
@@ -577,9 +801,10 @@ pub fn list_projects(db_path: &Path) -> Result<Vec<Project>> {
 }
 
 pub fn save_project(db_path: &Path, project: &Project) -> Result<()> {
-    let conn = open_connection(db_path)?;
+    let mut conn = open_connection(db_path)?;
     let catalog_order = resolve_catalog_order(&conn, project)?;
-    conn.execute(
+    let transaction = conn.transaction()?;
+    transaction.execute(
         "INSERT INTO projects (
             id, name, root_path, runtime_kind, package_manager, run_mode, run_target, shell,
             selected_env_file, available_env_files_json, available_scripts_json, port,
@@ -639,12 +864,12 @@ pub fn save_project(db_path: &Path, project: &Project) -> Result<()> {
         ],
     )?;
 
-    conn.execute(
+    transaction.execute(
         "DELETE FROM project_env_overrides WHERE project_id = ?1",
         [project.id.as_str()],
     )?;
     for override_entry in &project.env_overrides {
-        conn.execute(
+        transaction.execute(
             "INSERT INTO project_env_overrides (id, project_id, key, value, is_secret, enabled)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
             params![
@@ -658,12 +883,12 @@ pub fn save_project(db_path: &Path, project: &Project) -> Result<()> {
         )?;
     }
 
-    conn.execute(
+    transaction.execute(
         "DELETE FROM project_dependencies WHERE project_id = ?1",
         [project.id.as_str()],
     )?;
     for dependency in &project.dependencies {
-        conn.execute(
+        transaction.execute(
             "INSERT INTO project_dependencies (id, project_id, depends_on_project_id, required_for_start)
              VALUES (?1, ?2, ?3, ?4)",
             params![
@@ -675,6 +900,7 @@ pub fn save_project(db_path: &Path, project: &Project) -> Result<()> {
         )?;
     }
 
+    transaction.commit()?;
     Ok(())
 }
 
@@ -808,6 +1034,46 @@ pub fn update_project_status(
         params![status.as_str(), exit_code, project_id],
     )?;
     Ok(())
+}
+
+pub fn update_project_mock_summary(
+    db_path: &Path,
+    project_id: &str,
+    summary: &ProjectMockSummary,
+) -> Result<()> {
+    let conn = open_connection(db_path)?;
+    save_project_mock_summary_with_conn(&conn, project_id, summary)
+}
+
+pub fn append_captured_mock_summary(
+    db_path: &Path,
+    project_id: &str,
+    request_path: &str,
+    recorded_at: &str,
+    is_graphql: bool,
+) -> Result<ProjectMockSummary> {
+    let conn = open_connection(db_path)?;
+    let mut summary = load_project_mock_summary_from_conn(&conn, project_id)?;
+    summary.total_count += 1;
+    if is_graphql {
+        summary.graphql_count += 1;
+    } else {
+        summary.rest_count += 1;
+    }
+    summary.captured_count += 1;
+    if summary.routes.len() < 4 && !summary.routes.iter().any(|route| route == request_path) {
+        summary.routes.push(request_path.to_string());
+    }
+    if summary
+        .last_updated_at
+        .as_ref()
+        .map(|current| compare_summary_timestamps(recorded_at, current).is_gt())
+        .unwrap_or(true)
+    {
+        summary.last_updated_at = Some(recorded_at.to_string());
+    }
+    save_project_mock_summary_with_conn(&conn, project_id, &summary)?;
+    Ok(summary)
 }
 
 pub fn build_snapshot(db_path: &Path) -> Result<Snapshot> {
