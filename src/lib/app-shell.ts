@@ -13,8 +13,8 @@ export type ThemeDefinition = {
 
 export type QuickProfile = {
   id: string;
-  label: string;
-  description: string;
+  labelKey: string;
+  descriptionKey: string;
   projectIds: string[];
 };
 
@@ -34,25 +34,25 @@ export const THEME_DEFINITIONS: ThemeDefinition[] = [
   {
     id: "aurora",
     label: "Aurora",
-    description: "neon frio y capas atmosfericas",
+    description: "theme.aurora_desc",
     preview: ["#23d5f6", "#8bff4d", "#0f172a"],
   },
   {
     id: "ember",
     label: "Brasa",
-    description: "editorial calido sobre cobre y papel",
+    description: "theme.ember_desc",
     preview: ["#ffb347", "#c2410c", "#4a1d12"],
   },
   {
     id: "harbor",
     label: "Puerto",
-    description: "marino tecnico con acentos industriales",
+    description: "theme.harbor_desc",
     preview: ["#14b8a6", "#fb923c", "#082f49"],
   },
   {
     id: "terminal",
     label: "CRT",
-    description: "retro terminal con fosforo y scanlines",
+    description: "theme.terminal_desc",
     preview: ["#4ade80", "#bef264", "#06110b"],
   },
 ];
@@ -161,8 +161,8 @@ export function buildQuickProfiles(projects: Project[], selectedProjectId: strin
     if (dependencyClosure.length) {
       profiles.push({
         id: "selected-deps",
-        label: "Seleccion + deps",
-        description: "Arranca solo el proyecto seleccionado y sus dependencias requeridas.",
+        labelKey: "quickProfiles.selectedDeps_label",
+        descriptionKey: "quickProfiles.selectedDeps_desc",
         projectIds: dependencyClosure,
       });
     }
@@ -171,8 +171,8 @@ export function buildQuickProfiles(projects: Project[], selectedProjectId: strin
   if (backendProjectIds.length) {
     profiles.push({
       id: "backend",
-      label: "Backend",
-      description: "Arranca solo los servicios habilitados detectados como backend.",
+      labelKey: "quickProfiles.backend_label",
+      descriptionKey: "quickProfiles.backend_desc",
       projectIds: backendProjectIds,
     });
   }
@@ -180,8 +180,8 @@ export function buildQuickProfiles(projects: Project[], selectedProjectId: strin
   if (frontendProjectIds.length) {
     profiles.push({
       id: "frontend",
-      label: "Frontend",
-      description: "Arranca solo los servicios habilitados detectados como frontend.",
+      labelKey: "quickProfiles.frontend_label",
+      descriptionKey: "quickProfiles.frontend_desc",
       projectIds: frontendProjectIds,
     });
   }
@@ -189,8 +189,8 @@ export function buildQuickProfiles(projects: Project[], selectedProjectId: strin
   if (enabledProjectIds.length) {
     profiles.push({
       id: "all-enabled",
-      label: "Habilitados",
-      description: "Arranca todos los servicios habilitados.",
+      labelKey: "quickProfiles.allEnabled_label",
+      descriptionKey: "quickProfiles.allEnabled_desc",
       projectIds: enabledProjectIds,
     });
   }

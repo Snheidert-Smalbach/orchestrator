@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { Folder, Info, Play, RefreshCw, Rocket, Save, Square, Trash2, TriangleAlert, type LucideIcon } from "lucide-react";
 import { inspectProject } from "../lib/tauri";
 import type { DetectedProject, Preset, Project, ProjectEnvOverride, ProjectResourceUsage } from "../lib/types";
+import { useTranslation } from "../i18n";
 import { ProjectMocksEditor } from "./project-mocks-editor";
 import { StatusPill } from "./status-pill";
 import { Badge } from "./ui/badge";
@@ -187,6 +188,7 @@ export function ProjectDetail({
   onForceStart,
   onDelete,
 }: Props) {
+  const { t } = useTranslation();
   const [draft, setDraft] = useState<Project | null>(project);
   const [activeTab, setActiveTab] = useState<DetailTabId>("config");
   const [overridesText, setOverridesText] = useState("");
@@ -280,7 +282,7 @@ export function ProjectDetail({
         });
       });
     } catch (error) {
-      setMetadataError(error instanceof Error ? error.message : "No fue posible releer scripts y variables del proyecto.");
+      setMetadataError(error instanceof Error ? error.message : t("detail.errorLoadMetadata"));
     } finally {
       setIsRefreshing(false);
     }
@@ -313,7 +315,7 @@ export function ProjectDetail({
       savedSignatureRef.current = signature;
       setSaveState("saved");
     } catch (error) {
-      const message = error instanceof Error ? error.message : "No fue posible guardar el proyecto.";
+      const message = error instanceof Error ? error.message : t("detail.errorSave");
       setSaveState("error");
       setSaveError(message);
       throw error;
@@ -351,8 +353,8 @@ export function ProjectDetail({
     return (
       <div className="surface-panel flex h-full items-center justify-center p-5">
         <EmptyState
-          title="Selecciona un proyecto"
-          description="El detalle de configuración, dependencias, workspaces y mocks aparece cuando eliges un servicio del catálogo."
+          title={t("detail.emptyTitle")}
+          description={t("detail.emptyDesc")}
         />
       </div>
     );
@@ -365,12 +367,12 @@ export function ProjectDetail({
   const showForceStopWarning = canForceStop;
   const saveHint =
     saveState === "saving"
-      ? "Guardando..."
+      ? t("detail.saveSaving")
       : saveState === "pending"
-        ? "Autosave pendiente..."
+        ? t("detail.savePending")
         : saveState === "error"
-          ? saveError ?? "No fue posible guardar."
-          : "Autosave activo";
+          ? saveError ?? t("detail.saveError")
+          : t("detail.saveActive");
 
   async function handleSave() {
     const projectDraft = draft;
@@ -401,7 +403,7 @@ export function ProjectDetail({
         <div className="flex flex-wrap items-start justify-between gap-2.5">
           <div className="min-w-0 flex-1">
             <div className="flex flex-wrap items-center gap-2">
-              <p className="text-[10px] uppercase tracking-[0.24em] text-textSoft">Detalle</p>
+              <p className="text-[10px] uppercase tracking-[0.24em] text-textSoft">{t("detail.section")}</p>
               <StatusPill status={draft.status} />
               <Badge variant="secondary">{draft.runtimeKind}</Badge>
             </div>
@@ -410,8 +412,8 @@ export function ProjectDetail({
               <DetailMetaChip icon={Folder} label={draft.rootPath} className="max-w-full sm:max-w-[28rem]" />
               <DetailMetaChip
                 icon={Info}
-                label={`${draft.availableScripts.length} scripts / ${draft.availableEnvFiles.length} env`}
-                title={`${draft.availableScripts.length} scripts disponibles y ${draft.availableEnvFiles.length} archivos .env detectados`}
+                label={t("detail.metaScripts", { scripts: String(draft.availableScripts.length), env: String(draft.availableEnvFiles.length) })}
+                title={t("detail.metaScriptsTitle", { scripts: String(draft.availableScripts.length), env: String(draft.availableEnvFiles.length) })}
               />
               {runtimeMessage ? (
                 <DetailMetaChip icon={Info} tone="info" label={runtimeMessage} className="max-w-full sm:max-w-[22rem]" />
@@ -420,22 +422,22 @@ export function ProjectDetail({
                 <DetailMetaChip
                   icon={Rocket}
                   tone="warn"
-                  label="Puerto ocupado"
-                  title="El puerto configurado parece ocupado. Puedes usar Forzar e iniciar para liberar ese puerto y arrancar el servicio."
+                  label={t("detail.portOccupied")}
+                  title={t("detail.portOccupiedTitle")}
                 />
               ) : null}
               {showForceStopWarning ? (
                 <DetailMetaChip
                   icon={TriangleAlert}
                   tone="danger"
-                  label="Forzar sugerido"
-                  title="La detencion normal no libero el servicio. Puedes usar Forzar para matar el PID o liberar el puerto."
+                  label={t("detail.forceSuggested")}
+                  title={t("detail.forceSuggestedTitle")}
                 />
               ) : null}
-              {metadataError ? <DetailMetaChip icon={TriangleAlert} tone="danger" label="Error de metadata" title={metadataError} /> : null}
-              {saveState === "error" ? <DetailMetaChip icon={Save} tone="danger" label="Error al guardar" title={saveHint} /> : null}
+              {metadataError ? <DetailMetaChip icon={TriangleAlert} tone="danger" label={t("detail.metadataError")} title={metadataError} /> : null}
+              {saveState === "error" ? <DetailMetaChip icon={Save} tone="danger" label={t("detail.saveErrorChip")} title={saveHint} /> : null}
               {isRefreshing ? (
-                <DetailMetaChip icon={RefreshCw} tone="info" label="Leyendo metadata" spin title="Leyendo metadata del proyecto..." />
+                <DetailMetaChip icon={RefreshCw} tone="info" label={t("detail.readingMetadata")} spin title={t("detail.readingMetadataTitle")} />
               ) : null}
             </div>
           </div>
@@ -448,26 +450,26 @@ export function ProjectDetail({
               disabled={isRefreshing}
             >
               <RefreshCw className={["h-3.5 w-3.5", isRefreshing ? "animate-spin" : ""].join(" ")} />
-              Recargar
+              {t("detail.reloadBtn")}
             </Button>
             <Button type="button" variant="success" size="sm" onClick={() => void handleStart()}>
               <Play className="h-3.5 w-3.5" />
-              Iniciar
+              {t("detail.startBtn")}
             </Button>
             <Button type="button" variant="secondary" size="sm" onClick={() => void onStop(draft.id)}>
               <Square className="h-3.5 w-3.5" />
-              Detener
+              {t("detail.stopBtn")}
             </Button>
             {canForceStart ? (
               <Button type="button" variant="warning" size="sm" onClick={() => void onForceStart(draft.id)}>
                 <Rocket className="h-3.5 w-3.5" />
-                Forzar e iniciar
+                {t("detail.forceStartBtn")}
               </Button>
             ) : null}
             {!canForceStart && showForceStopAction ? (
               <Button type="button" variant="destructive" size="sm" onClick={() => void onForceStop(draft.id)}>
                 <TriangleAlert className="h-3.5 w-3.5" />
-                Forzar
+                {t("detail.forceStopBtn")}
               </Button>
             ) : null}
           </div>
@@ -476,9 +478,9 @@ export function ProjectDetail({
 
       <div className="surface-divider flex shrink-0 items-center gap-2 px-4 py-1.5">
         <TabsList>
-          <TabsTrigger value="config">Configuración</TabsTrigger>
+          <TabsTrigger value="config">{t("detail.configTab")}</TabsTrigger>
           <TabsTrigger value="mocks">
-            Mocks
+            {t("detail.mocksTab")}
             <Badge variant="secondary" className="px-1.5 py-0.5 text-[9px]">
               {draft.mockSummary.totalCount}
             </Badge>
@@ -489,13 +491,13 @@ export function ProjectDetail({
       <TabsContent value="config" className="min-h-0 flex-1 overflow-auto">
         <div className="grid gap-3 p-4 [grid-template-columns:repeat(auto-fit,minmax(180px,1fr))]">
           <FieldLabelWrap>
-            <FieldLabel>Nombre</FieldLabel>
+            <FieldLabel>{t("detail.nameLabel")}</FieldLabel>
             <Input value={draft.name} onChange={(event) => setDraft({ ...draft, name: event.target.value })} />
           </FieldLabelWrap>
 
           {draft.runMode === "script" && scriptOptions.length > 0 ? (
             <FieldLabelWrap>
-              <FieldLabel>Script</FieldLabel>
+              <FieldLabel>{t("detail.scriptLabel")}</FieldLabel>
               <Select value={draft.runTarget} onChange={(event) => setDraft({ ...draft, runTarget: event.target.value })}>
                 {scriptOptions.map((script) => (
                   <option key={script} value={script}>
@@ -506,13 +508,13 @@ export function ProjectDetail({
             </FieldLabelWrap>
           ) : (
             <FieldLabelWrap>
-              <FieldLabel>Run target</FieldLabel>
+              <FieldLabel>{t("detail.runTargetLabel")}</FieldLabel>
               <Input value={draft.runTarget} onChange={(event) => setDraft({ ...draft, runTarget: event.target.value })} />
             </FieldLabelWrap>
           )}
 
           <FieldLabelWrap>
-            <FieldLabel>Modo</FieldLabel>
+            <FieldLabel>{t("detail.modeLabel")}</FieldLabel>
             <Select
               value={draft.runMode}
               onChange={(event) => {
@@ -524,13 +526,13 @@ export function ProjectDetail({
                 });
               }}
             >
-              <option value="script">Script</option>
-              <option value="command">Comando</option>
+              <option value="script">{t("detail.modeScript")}</option>
+              <option value="command">{t("detail.modeCommand")}</option>
             </Select>
           </FieldLabelWrap>
 
           <FieldLabelWrap>
-            <FieldLabel>Package manager</FieldLabel>
+            <FieldLabel>{t("detail.pkgManagerLabel")}</FieldLabel>
             <Select
               value={draft.packageManager}
               onChange={(event) => setDraft({ ...draft, packageManager: event.target.value as Project["packageManager"] })}
@@ -544,7 +546,7 @@ export function ProjectDetail({
           </FieldLabelWrap>
 
           <FieldLabelWrap>
-            <FieldLabel>.env</FieldLabel>
+            <FieldLabel>{t("detail.envLabel")}</FieldLabel>
             <Select
               value={draft.selectedEnvFile ?? ""}
               onChange={(event) => {
@@ -572,7 +574,7 @@ export function ProjectDetail({
                 });
               }}
             >
-              <option value="">Sin archivo</option>
+              <option value="">{t("detail.envNoFile")}</option>
               {draft.availableEnvFiles.map((envFile) => (
                 <option key={envFile} value={envFile}>
                   {envFile}
@@ -584,7 +586,7 @@ export function ProjectDetail({
           <Card tone="muted" className="[grid-column:1/-1] p-4">
             <div className="grid gap-3 [grid-template-columns:repeat(auto-fit,minmax(150px,1fr))]">
               <FieldLabelWrap>
-                <FieldLabel>Puerto</FieldLabel>
+                <FieldLabel>{t("detail.portLabel")}</FieldLabel>
                 <Input
                   type="number"
                   value={draft.port ?? ""}
@@ -605,7 +607,7 @@ export function ProjectDetail({
               </FieldLabelWrap>
 
               <FieldLabelWrap>
-                <FieldLabel>Fase</FieldLabel>
+                <FieldLabel>{t("detail.phaseLabel")}</FieldLabel>
                 <Input
                   type="number"
                   value={draft.startupPhase}
@@ -614,12 +616,12 @@ export function ProjectDetail({
               </FieldLabelWrap>
 
               <FieldLabelWrap>
-                <FieldLabel>Orden</FieldLabel>
+                <FieldLabel>{t("detail.orderLabel")}</FieldLabel>
                 <Input type="number" value={draft.catalogOrder} disabled />
               </FieldLabelWrap>
 
               <FieldLabelWrap>
-                <FieldLabel>Ready</FieldLabel>
+                <FieldLabel>{t("detail.readyLabel")}</FieldLabel>
                 <Select
                   value={draft.readinessMode}
                   onChange={(event) => {
@@ -646,7 +648,7 @@ export function ProjectDetail({
 
           <div className="grid gap-3 [grid-column:1/-1] [grid-template-columns:repeat(auto-fit,minmax(180px,1fr))]">
             <FieldLabelWrap>
-              <FieldLabel>Arranque</FieldLabel>
+              <FieldLabel>{t("detail.launchLabel")}</FieldLabel>
               <Select
                 value={draft.launchMode}
                 onChange={(event) => setDraft({ ...draft, launchMode: event.target.value as Project["launchMode"] })}
@@ -658,7 +660,7 @@ export function ProjectDetail({
             </FieldLabelWrap>
 
             <FieldLabelWrap>
-              <FieldLabel>Mock match</FieldLabel>
+              <FieldLabel>{t("detail.mockMatchLabel")}</FieldLabel>
               <Select
                 value={draft.mockMatchMode}
                 onChange={(event) => setDraft({ ...draft, mockMatchMode: event.target.value as Project["mockMatchMode"] })}
@@ -670,7 +672,7 @@ export function ProjectDetail({
             </FieldLabelWrap>
 
             <FieldLabelWrap>
-              <FieldLabel>Miss status</FieldLabel>
+              <FieldLabel>{t("detail.missStatusLabel")}</FieldLabel>
               <Input
                 type="number"
                 value={draft.mockUnmatchedStatus}
@@ -681,36 +683,38 @@ export function ProjectDetail({
 
           <Card tone="accent" className="[grid-column:1/-1] p-4 text-[12px] text-textMuted">
             {draft.launchMode === "service"
-              ? "service: arranca el microservicio tal cual está configurado."
+              ? t("detail.launchServiceDesc")
               : draft.launchMode === "record"
-                ? "record: publica un proxy grabador en el puerto del servicio, mueve el proceso real a un puerto interno y guarda request/response para futuros mocks."
-                : "mock: levanta un mock HTTP liviano desde las capturas guardadas en el puerto configurado."}
+                ? t("detail.launchRecordDesc")
+                : t("detail.launchMockDesc")}
           </Card>
 
           <Card tone="muted" className="[grid-column:1/-1] p-4">
             <FieldGroup>
-              <FieldLabel>Proceso</FieldLabel>
+              <FieldLabel>{t("detail.processLabel")}</FieldLabel>
               <div className="grid gap-2 [grid-template-columns:repeat(auto-fit,minmax(160px,1fr))]">
                 <div>
-                  <p className="text-[10px] uppercase tracking-[0.14em] text-textSoft">PID</p>
+                  <p className="text-[10px] uppercase tracking-[0.14em] text-textSoft">{t("detail.pidLabel")}</p>
                   <p className="mt-1 text-[12px] text-textStrong">{resourceUsage?.trackedPid ?? "n/a"}</p>
                 </div>
                 <div>
-                  <p className="text-[10px] uppercase tracking-[0.14em] text-textSoft">Subprocesos</p>
+                  <p className="text-[10px] uppercase tracking-[0.14em] text-textSoft">{t("detail.subprocessesLabel")}</p>
                   <p className="mt-1 text-[12px] text-textStrong">
-                    {resourceUsage ? `${resourceUsage.totalProcesses} total / ${resourceUsage.totalNodeProcesses} node` : "Sin proceso"}
+                    {resourceUsage
+                      ? t("detail.subprocessesValue", { total: String(resourceUsage.totalProcesses), node: String(resourceUsage.totalNodeProcesses) })
+                      : t("detail.subprocessesNone")}
                   </p>
                 </div>
                 <div>
-                  <p className="text-[10px] uppercase tracking-[0.14em] text-textSoft">RAM</p>
+                  <p className="text-[10px] uppercase tracking-[0.14em] text-textSoft">{t("detail.ramLabel")}</p>
                   <p className="mt-1 text-[12px] text-textStrong">
                     {resourceUsage ? `${resourceUsage.totalWorkingSetMb.toFixed(1)} MB` : "n/a"}
                   </p>
                 </div>
                 <div className="[grid-column:1/-1] min-w-0">
-                  <p className="text-[10px] uppercase tracking-[0.14em] text-textSoft">Comando activo</p>
-                  <p className="mt-1 truncate text-[12px] text-textMuted" title={resourceUsage?.commandPreview ?? "Sin proceso"}>
-                    {resourceUsage?.commandPreview ?? "Sin proceso rastreado por el orchestrator"}
+                  <p className="text-[10px] uppercase tracking-[0.14em] text-textSoft">{t("detail.activeCommandLabel")}</p>
+                  <p className="mt-1 truncate text-[12px] text-textMuted" title={resourceUsage?.commandPreview ?? t("detail.subprocessesNone")}>
+                    {resourceUsage?.commandPreview ?? t("detail.noProcess")}
                   </p>
                 </div>
               </div>
@@ -718,14 +722,14 @@ export function ProjectDetail({
           </Card>
 
           <FieldLabelWrap className="[grid-column:1/-1]">
-            <FieldLabel>Overrides</FieldLabel>
+            <FieldLabel>{t("detail.overridesLabel")}</FieldLabel>
             <Textarea rows={6} value={overridesText} onChange={(event) => setOverridesText(event.target.value)} />
-            <FieldHint>Usa formato `KEY=value` por línea. Se guardan como overrides activos del proyecto.</FieldHint>
+            <FieldHint>{t("detail.overridesHint")}</FieldHint>
           </FieldLabelWrap>
 
           <Card tone="muted" className="[grid-column:1/-1] p-4">
             <FieldGroup>
-              <FieldLabel>Dependencias</FieldLabel>
+              <FieldLabel>{t("detail.dependenciesLabel")}</FieldLabel>
               <div className="grid gap-2 [grid-template-columns:repeat(auto-fit,minmax(180px,1fr))]">
                 {otherProjects.length ? (
                   otherProjects.map((entry) => {
@@ -750,8 +754,8 @@ export function ProjectDetail({
                   })
                 ) : (
                   <EmptyState
-                    title="Sin dependencias disponibles"
-                    description="No hay otros proyectos en el catálogo para enlazar como dependencias de arranque."
+                    title={t("detail.depsEmptyTitle")}
+                    description={t("detail.depsEmptyDesc")}
                   />
                 )}
               </div>
@@ -760,7 +764,7 @@ export function ProjectDetail({
 
           <Card tone="muted" className="[grid-column:1/-1] p-4">
             <FieldGroup>
-              <FieldLabel>Workspaces</FieldLabel>
+              <FieldLabel>{t("detail.workspacesLabel")}</FieldLabel>
               {editablePresets.length ? (
                 <div className="grid gap-2 [grid-template-columns:repeat(auto-fit,minmax(180px,1fr))]">
                   {editablePresets.map((preset) => {
@@ -781,8 +785,8 @@ export function ProjectDetail({
                 </div>
               ) : (
                 <EmptyState
-                  title="Todavía no hay workspaces"
-                  description="Crea un workspace para agrupar y ejecutar microservicios por pestañas."
+                  title={t("detail.workspacesEmptyTitle")}
+                  description={t("detail.workspacesEmptyDesc")}
                 />
               )}
             </FieldGroup>
@@ -792,8 +796,8 @@ export function ProjectDetail({
             <FieldRow>
               <Checkbox checked={draft.enabled} onChange={(event) => setDraft({ ...draft, enabled: event.currentTarget.checked })} />
               <div>
-                <p className="text-[13px] font-medium text-textStrong">Habilitado para acciones globales</p>
-                <p className="text-[11px] text-textMuted">Participa en arranques, stops y perfiles rápidos del catálogo.</p>
+                <p className="text-[13px] font-medium text-textStrong">{t("detail.enabledLabel")}</p>
+                <p className="text-[11px] text-textMuted">{t("detail.enabledDesc")}</p>
               </div>
             </FieldRow>
           </Card>
@@ -805,8 +809,8 @@ export function ProjectDetail({
                 onChange={(event) => setDraft({ ...draft, waitForPreviousReady: event.currentTarget.checked })}
               />
               <div>
-                <p className="text-[13px] font-medium text-textStrong">Esperar ready del anterior</p>
-                <p className="text-[11px] text-textMuted">Aplica a arranques por lote para controlar la secuencia de dependencias.</p>
+                <p className="text-[13px] font-medium text-textStrong">{t("detail.waitReadyLabel")}</p>
+                <p className="text-[11px] text-textMuted">{t("detail.waitReadyDesc")}</p>
               </div>
             </FieldRow>
           </Card>
@@ -819,16 +823,16 @@ export function ProjectDetail({
 
       <div className="surface-divider-top flex flex-wrap items-center justify-between gap-2 px-4 py-3">
         <p className={["text-[11px]", saveState === "error" ? "text-danger" : "text-textSoft"].join(" ")}>
-          Último exit code: {draft.lastExitCode ?? "n/a"} | {saveHint}
+          {t("detail.exitCode", { code: String(draft.lastExitCode ?? "n/a") })} | {saveHint}
         </p>
         <div className="flex flex-wrap gap-1.5">
           <Button type="button" variant="destructive" size="sm" onClick={() => void onDelete(draft.id)}>
             <Trash2 className="h-3.5 w-3.5" />
-            Eliminar
+            {t("detail.deleteBtn")}
           </Button>
           <Button type="button" variant="default" size="sm" onClick={() => void handleSave()}>
             <Save className="h-3.5 w-3.5" />
-            Guardar
+            {t("detail.saveBtn")}
           </Button>
         </div>
       </div>

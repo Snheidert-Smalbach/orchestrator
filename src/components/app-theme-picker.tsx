@@ -1,6 +1,7 @@
 import { MoonStar, Palette, SunMedium } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import type { ThemeDefinition, ThemeFamily, ThemeMode } from "../lib/app-shell";
+import { useTranslation } from "../i18n";
 import { Button } from "./ui/button";
 import { Card } from "./ui/card";
 
@@ -21,6 +22,7 @@ export function AppThemePicker({
   onThemeModeChange,
   onThemeFamilyChange,
 }: Props) {
+  const { t } = useTranslation();
   const [open, setOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement | null>(null);
 
@@ -41,6 +43,8 @@ export function AppThemePicker({
     };
   }, [open]);
 
+  const modeLabel = themeMode === "dark" ? t("theme.dark") : t("theme.light");
+
   return (
     <div ref={containerRef} className="relative">
       <Button
@@ -48,7 +52,7 @@ export function AppThemePicker({
         variant="secondary"
         size="icon"
         onClick={() => setOpen((current) => !current)}
-        title={`Tema ${activeTheme.label} ${themeMode === "dark" ? "oscuro" : "claro"}`}
+        title={t("theme.buttonTitle", { theme: activeTheme.label, mode: modeLabel })}
       >
         <Palette className="h-4 w-4" />
       </Button>
@@ -57,9 +61,9 @@ export function AppThemePicker({
         <Card className="absolute right-0 top-full z-20 mt-2 w-[260px] p-2" tone="muted">
           <div className="flex items-center justify-between gap-2">
             <div>
-              <p className="text-[9px] uppercase tracking-[0.2em] text-textSoft">Tema</p>
+              <p className="text-[9px] uppercase tracking-[0.2em] text-textSoft">{t("theme.label")}</p>
               <p className="mt-0.5 text-[10px] text-textMuted">
-                {activeTheme.label} {themeMode === "dark" ? "oscuro" : "claro"}
+                {activeTheme.label} {modeLabel}
               </p>
             </div>
             <div className="surface-chip inline-flex overflow-hidden">
@@ -112,7 +116,9 @@ export function AppThemePicker({
                   <span className="mt-1 block text-[10px] font-semibold uppercase tracking-[0.14em] text-textStrong">
                     {theme.label}
                   </span>
-                  <span className="mt-0.5 block text-[10px] text-textSoft">{theme.description}</span>
+                  <span className="mt-0.5 block text-[10px] text-textSoft">
+                    {t(theme.description as Parameters<typeof t>[0])}
+                  </span>
                 </button>
               );
             })}

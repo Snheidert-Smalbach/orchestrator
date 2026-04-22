@@ -2,6 +2,7 @@ import { Pin, PinOff } from "lucide-react";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { LogPayload, Project } from "../lib/types";
 import { useAppStore } from "../store/useAppStore";
+import { useTranslation } from "../i18n";
 import { Button } from "./ui/button";
 import { EmptyState } from "./ui/empty-state";
 import { ScrollArea } from "./ui/scroll-area";
@@ -66,6 +67,7 @@ function isNearBottom(element: HTMLDivElement) {
 }
 
 export function LogConsole({ projects, selectedProjectId }: LogConsoleProps) {
+  const { t } = useTranslation();
   const logs = useAppStore((state) => state.logs);
   const combinedLogs = useAppStore((state) => state.combinedLogs);
   const [activeTab, setActiveTab] = useState<string>(selectedProjectId ?? "combined");
@@ -144,8 +146,8 @@ export function LogConsole({ projects, selectedProjectId }: LogConsoleProps) {
     if (!entries.length) {
       return (
         <EmptyState
-          title="Sin salida todavía"
-          description="Cuando haya eventos o logs del runtime aparecerán en esta consola."
+          title={t("console.emptyTitle")}
+          description={t("console.emptyDesc")}
           className="mt-4"
         />
       );
@@ -188,25 +190,25 @@ export function LogConsole({ projects, selectedProjectId }: LogConsoleProps) {
     <div className="surface-panel flex h-full min-h-0 flex-col overflow-hidden">
       <div className="surface-divider flex flex-wrap items-center justify-between gap-2 px-3 py-2">
         <div>
-          <p className="text-[9px] uppercase tracking-[0.22em] text-textSoft">Observabilidad</p>
-          <h2 className="mt-0.5 text-[12px] font-semibold text-textStrong">Consola de salida</h2>
+          <p className="text-[9px] uppercase tracking-[0.22em] text-textSoft">{t("console.section")}</p>
+          <h2 className="mt-0.5 text-[12px] font-semibold text-textStrong">{t("console.title")}</h2>
         </div>
         <Button
           type="button"
           variant={followOutput ? "default" : "secondary"}
           size="sm"
           onClick={() => setFollowOutput((current) => !current)}
-          title="Mantener la consola pegada al final"
+          title={t("console.pinTitle")}
         >
           {followOutput ? <Pin className="h-3 w-3" /> : <PinOff className="h-3 w-3" />}
-          {followOutput ? "Pegada abajo" : "Fijar abajo"}
+          {followOutput ? t("console.pinned") : t("console.pin")}
         </Button>
       </div>
 
       <Tabs value={activeTab} onValueChange={setActiveTab} className="flex min-h-0 flex-1 flex-col overflow-hidden">
         <TabsList className="surface-divider overflow-auto bg-ink/30 px-2 py-1 scrollbar-thin">
           <TabsTrigger value="combined" className="font-mono text-[9px]">
-            Combinado
+            {t("console.combined")}
           </TabsTrigger>
           {projects.map((project) => (
             <TabsTrigger key={project.id} value={project.id} className="font-mono text-[9px]">

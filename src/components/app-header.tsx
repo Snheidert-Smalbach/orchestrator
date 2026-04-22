@@ -3,6 +3,7 @@ import {
   Boxes,
   FolderPlus,
   FolderSearch,
+  Globe,
   Play,
   Rocket,
   Square,
@@ -12,6 +13,7 @@ import {
 } from "lucide-react";
 import type { Preset } from "../lib/types";
 import type { QuickProfile, ThemeDefinition, ThemeFamily, ThemeMode } from "../lib/app-shell";
+import { useTranslation } from "../i18n";
 import { AppThemePicker } from "./app-theme-picker";
 import { Badge } from "./ui/badge";
 import { Button } from "./ui/button";
@@ -69,6 +71,8 @@ export function AppHeader({
   onForceStart,
   onRemovePreset,
 }: Props) {
+  const { t, language, setLanguage } = useTranslation();
+
   return (
     <header className="surface-panel shrink-0 px-3 py-3">
       <div className="flex flex-wrap items-start justify-between gap-3">
@@ -76,30 +80,48 @@ export function AppHeader({
           <div className="flex flex-wrap items-center gap-2">
             <Badge variant="info" className="px-2 py-1 tracking-[0.24em]">
               <Waves className="h-3 w-3" />
-              Back Orchestrator
+              {t("header.appName")}
             </Badge>
             <h1 className="truncate text-[15px] font-semibold tracking-tight text-textStrong">
-              Orquestador local de microservicios
+              {t("header.title")}
             </h1>
           </div>
           <p className="mt-1 max-w-[900px] text-[11px] leading-5 text-textMuted">
-            Catálogo, configuración, mocks y observabilidad sobre una capa de UI reusable inspirada en shadcn/studio.
+            {t("header.subtitle")}
           </p>
         </div>
 
         <div className="flex flex-wrap items-center gap-1.5">
           {quickProfiles.length ? (
-            <Button type="button" variant="secondary" size="icon" onClick={onOpenQuickActions} title="Abrir acciones rápidas">
+            <Button
+              type="button"
+              variant="secondary"
+              size="icon"
+              onClick={onOpenQuickActions}
+              title={t("header.openQuickActions")}
+            >
               <Boxes className="h-4 w-4" />
               <span className="absolute -right-1 -top-1 min-w-[16px] border border-accent/35 bg-accent/10 px-1 text-[8px] font-semibold text-accent">
                 {quickProfiles.length}
               </span>
             </Button>
           ) : null}
-          <Button type="button" variant="secondary" size="icon" onClick={onOpenUsage} title="Abrir panel de uso y recursos">
+          <Button
+            type="button"
+            variant="secondary"
+            size="icon"
+            onClick={onOpenUsage}
+            title={t("header.openUsage")}
+          >
             <Activity className="h-4 w-4" />
           </Button>
-          <Button type="button" variant="secondary" size="icon" onClick={onOpenAlerts} title="Abrir avisos y errores">
+          <Button
+            type="button"
+            variant="secondary"
+            size="icon"
+            onClick={onOpenAlerts}
+            title={t("header.openAlerts")}
+          >
             <TriangleAlert className={`h-4 w-4 ${alertCount ? "text-warn" : ""}`} />
             {alertCount ? (
               <span className="absolute -right-1 -top-1 min-w-[16px] border border-warn/35 bg-warn/12 px-1 text-[8px] font-semibold text-warn">
@@ -107,6 +129,20 @@ export function AppHeader({
               </span>
             ) : null}
           </Button>
+
+          {/* ── Language selector ──────────────────────────────────── */}
+          <Button
+            type="button"
+            variant="secondary"
+            size="icon"
+            onClick={() => setLanguage(language === "en" ? "es" : "en")}
+            title={t("lang.switchTo")}
+            className="relative gap-0 font-mono text-[9px] font-semibold tracking-[0.08em]"
+          >
+            <Globe className="h-3 w-3" />
+            <span className="ml-0.5">{language.toUpperCase()}</span>
+          </Button>
+
           <AppThemePicker
             activeTheme={activeTheme}
             themeMode={themeMode}
@@ -120,9 +156,15 @@ export function AppHeader({
 
       <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
         <div className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto scrollbar-thin pb-0.5">
-          <Button type="button" variant="default" size="sm" onClick={onCreateWorkspace} title="Crear un nuevo workspace">
+          <Button
+            type="button"
+            variant="default"
+            size="sm"
+            onClick={onCreateWorkspace}
+            title={t("header.newWorkspaceTitle")}
+          >
             <FolderPlus className="h-3.5 w-3.5" />
-            Nuevo workspace
+            {t("header.newWorkspace")}
           </Button>
 
           {presets.map((preset) => (
@@ -143,9 +185,16 @@ export function AppHeader({
         </div>
 
         <div className="flex shrink-0 flex-wrap items-center gap-1.5">
-          <Button type="button" variant="secondary" size="sm" onClick={onScan} disabled={uiBusy} title="Escanear root actual">
+          <Button
+            type="button"
+            variant="secondary"
+            size="sm"
+            onClick={onScan}
+            disabled={uiBusy}
+            title={t("header.scanTitle")}
+          >
             <FolderSearch className="h-3.5 w-3.5" />
-            Escanear
+            {t("header.scan")}
           </Button>
           <Button
             type="button"
@@ -153,10 +202,14 @@ export function AppHeader({
             size="sm"
             onClick={onStart}
             disabled={uiBusy}
-            title={selectedPreset && !selectedPreset.readOnly ? `Iniciar ${selectedPreset.name}` : "Iniciar habilitados"}
+            title={
+              selectedPreset && !selectedPreset.readOnly
+                ? t("header.startPreset", { name: selectedPreset.name })
+                : t("header.startAll")
+            }
           >
             <Play className="h-3.5 w-3.5" />
-            Iniciar
+            {t("header.start")}
           </Button>
           <Button
             type="button"
@@ -164,10 +217,14 @@ export function AppHeader({
             size="sm"
             onClick={onStop}
             disabled={uiBusy}
-            title={selectedPreset && !selectedPreset.readOnly ? `Detener ${selectedPreset.name}` : "Detener servicios"}
+            title={
+              selectedPreset && !selectedPreset.readOnly
+                ? t("header.stopPreset", { name: selectedPreset.name })
+                : t("header.stopAll")
+            }
           >
             <Square className="h-3.5 w-3.5" />
-            Detener
+            {t("header.stop")}
           </Button>
           <Button
             type="button"
@@ -175,10 +232,14 @@ export function AppHeader({
             size="sm"
             onClick={onForceStop}
             disabled={uiBusy}
-            title={selectedPreset && !selectedPreset.readOnly ? `Forzar ${selectedPreset.name}` : "Forzar detención"}
+            title={
+              selectedPreset && !selectedPreset.readOnly
+                ? t("header.forcePreset", { name: selectedPreset.name })
+                : t("header.forceAll")
+            }
           >
             <TriangleAlert className="h-3.5 w-3.5" />
-            Forzar
+            {t("header.force")}
           </Button>
           {forceStartCount ? (
             <Button
@@ -187,10 +248,10 @@ export function AppHeader({
               size="sm"
               onClick={onForceStart}
               disabled={uiBusy}
-              title="Liberar puertos ocupados y volver a iniciar"
+              title={t("header.retryTitle")}
             >
               <Rocket className="h-3.5 w-3.5" />
-              Reintentar ({forceStartCount})
+              {t("header.retry", { count: forceStartCount })}
             </Button>
           ) : null}
           {!selectedPreset?.readOnly ? (
@@ -200,11 +261,11 @@ export function AppHeader({
               size="sm"
               onClick={onRemovePreset}
               disabled={uiBusy}
-              title="Eliminar workspace actual"
+              title={t("header.closeTabTitle")}
               className="text-danger"
             >
               <Trash2 className="h-3.5 w-3.5" />
-              Cerrar tab
+              {t("header.closeTab")}
             </Button>
           ) : null}
         </div>

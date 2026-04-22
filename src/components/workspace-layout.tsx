@@ -7,6 +7,7 @@ import {
   type ReactNode,
 } from "react";
 import type { Preset, Project, ProjectResourceUsage } from "../lib/types";
+import { useTranslation } from "../i18n";
 import { LogConsole } from "./log-console";
 import { ProjectDetail } from "./project-detail";
 import { ProjectList } from "./project-list";
@@ -63,20 +64,6 @@ const MAX_SIDE_WIDTH = 0.68;
 const MIN_CENTER_WIDTH = 0.12;
 const MIN_BOTTOM_HEIGHT = 0.12;
 const MAX_BOTTOM_HEIGHT = 0.82;
-
-const panelLabels: Record<WorkspacePanelId, string> = {
-  catalog: "Catalogo",
-  detail: "Detalle",
-  console: "Consola",
-};
-
-const zoneLabels: Record<WorkspaceZoneId, string> = {
-  left: "Izquierda",
-  main: "Centro",
-  right: "Derecha",
-  bottom: "Abajo",
-};
-
 
 const preferredZoneByPanel: Record<WorkspacePanelId, WorkspaceZoneId> = {
   catalog: "left",
@@ -255,6 +242,7 @@ export function WorkspaceLayout({
   onToggleProjectPreset,
   isBusy,
 }: Props) {
+  const { t } = useTranslation();
   const [layout, setLayout] = useState<LayoutState>(loadInitialLayout);
   const [dropZoneId, setDropZoneId] = useState<WorkspaceZoneId | null>(null);
   const [dragPanelId, setDragPanelId] = useState<WorkspacePanelId | null>(null);
@@ -267,6 +255,20 @@ export function WorkspaceLayout({
     startPointer: number;
     containerSize: number;
   } | null>(null);
+
+  // Translated panel/zone labels (reactive to language changes)
+  const panelLabels: Record<WorkspacePanelId, string> = {
+    catalog: t("layout.panels.catalog"),
+    detail: t("layout.panels.detail"),
+    console: t("layout.panels.console"),
+  };
+
+  const zoneLabels: Record<WorkspaceZoneId, string> = {
+    left: t("layout.zones.left"),
+    main: t("layout.zones.main"),
+    right: t("layout.zones.right"),
+    bottom: t("layout.zones.bottom"),
+  };
 
   useEffect(() => {
     window.localStorage.setItem(LAYOUT_STORAGE_KEY, JSON.stringify(layout));
@@ -562,13 +564,17 @@ export function WorkspaceLayout({
                       : "border-line bg-panel/55 text-textMuted hover:bg-panelSoft/75",
                     dragPanelId === panelId ? "opacity-70" : "",
                   ].join(" ")}
-                  title={`Arrastra ${panelLabels[panelId]} a otra zona`}
+                  title={t("layout.dragPanelTitle", { panel: panelLabels[panelId] })}
                 >
                   <GripVertical className="h-2.5 w-2.5" />
                   {panelLabels[panelId]}
                 </button>
               );
-            }) : <span className="px-1 text-[9px] uppercase tracking-[0.16em] text-textSoft">Zona libre</span>}
+            }) : (
+              <span className="px-1 text-[9px] uppercase tracking-[0.16em] text-textSoft">
+                {t("layout.freeZone")}
+              </span>
+            )}
           </div>
           <div className="hidden shrink-0 items-center gap-2 md:flex">
             {dragPanelId ? (
@@ -576,11 +582,13 @@ export function WorkspaceLayout({
                 "text-[9px] font-semibold uppercase tracking-[0.14em]",
                 isDropTarget ? "text-accent" : "text-textSoft",
               ].join(" ")}>
-                {isDropTarget ? `Suelta ${panelLabels[dragPanelId]} aqui` : zoneLabels[zoneId]}
+                {isDropTarget
+                  ? t("layout.dropPanel", { panel: panelLabels[dragPanelId] })
+                  : zoneLabels[zoneId]}
               </span>
             ) : (
               <span className="text-[9px] uppercase tracking-[0.14em] text-textSoft">
-                Arrastra y suelta
+                {t("layout.dragAndDrop")}
               </span>
             )}
           </div>
@@ -594,15 +602,15 @@ export function WorkspaceLayout({
                 : "border-line/80 bg-panel/82 text-textMuted",
             ].join(" ")}>
               {isDropTarget
-                ? `Mover ${panelLabels[dragPanelId]} a ${zoneLabels[zoneId].toLowerCase()}`
-                : `Suelta en ${zoneLabels[zoneId].toLowerCase()}`}
+                ? t("layout.movePanel", { panel: panelLabels[dragPanelId], zone: zoneLabels[zoneId].toLowerCase() })
+                : t("layout.dropInZone", { zone: zoneLabels[zoneId].toLowerCase() })}
             </span>
           </div>
         ) : null}
         <div className="min-h-0 flex-1 overflow-hidden">
           {resolvedPanelId ? panelRegistry[resolvedPanelId] : (
             <div className="flex h-full min-h-0 items-center justify-center bg-panel/45 px-4 text-[11px] text-textSoft">
-              Arrastra un panel aqui para fijarlo en {zoneLabels[zoneId].toLowerCase()}.
+              {t("layout.emptyZone", { zone: zoneLabels[zoneId].toLowerCase() })}
             </div>
           )}
         </div>
@@ -624,7 +632,7 @@ export function WorkspaceLayout({
             <div
               className="group flex w-2.5 shrink-0 cursor-col-resize items-center justify-center rounded-full bg-panelSoft/30 transition hover:bg-accent/20 active:bg-accent/28"
               onPointerDown={(event) => startResize("left", event)}
-              title="Redimensionar zona izquierda"
+              title={t("layout.resizeLeft")}
             >
               <div className="h-12 w-0.5 rounded-full bg-line/70 transition group-hover:h-16 group-hover:bg-accent/55" />
             </div>
@@ -638,7 +646,7 @@ export function WorkspaceLayout({
             <div
               className="group flex w-2.5 shrink-0 cursor-col-resize items-center justify-center rounded-full bg-panelSoft/30 transition hover:bg-accent/20 active:bg-accent/28"
               onPointerDown={(event) => startResize("right", event)}
-              title="Redimensionar zona derecha"
+              title={t("layout.resizeRight")}
             >
               <div className="h-12 w-0.5 rounded-full bg-line/70 transition group-hover:h-16 group-hover:bg-accent/55" />
             </div>
@@ -655,7 +663,7 @@ export function WorkspaceLayout({
           <div
             className="group flex h-2.5 shrink-0 cursor-row-resize items-center justify-center rounded-full bg-panelSoft/30 transition hover:bg-accent/20 active:bg-accent/28"
             onPointerDown={(event) => startResize("bottom", event)}
-            title="Redimensionar zona inferior"
+            title={t("layout.resizeBottom")}
           >
             <div className="h-0.5 w-14 rounded-full bg-line/70 transition group-hover:w-20 group-hover:bg-accent/55" />
           </div>
@@ -670,8 +678,3 @@ export function WorkspaceLayout({
     </div>
   );
 }
-
-
-
-
-

@@ -16,6 +16,7 @@ import {
 import { Fragment, useEffect, useMemo, useState } from "react";
 import { openServiceTopologyWindow } from "../lib/tauri";
 import type { Project, ProjectResourceUsage } from "../lib/types";
+import { useTranslation } from "../i18n";
 import { StatusPill } from "./status-pill";
 import { Badge } from "./ui/badge";
 import { Button } from "./ui/button";
@@ -114,59 +115,6 @@ function buildRowStyle(options: {
   };
 }
 
-const bulkActions: Array<{
-  id: string;
-  label: string;
-  description: string;
-  variant: "success" | "default" | "warning" | "secondary" | "destructive";
-  onRun: (
-    props: Pick<ProjectListProps, "onBulkStartVisible" | "onBulkStartVisibleAsMode" | "onBulkStopVisible" | "onBulkForceStopVisible">,
-  ) => void;
-}> = [
-  {
-    id: "start-visible",
-    label: "Iniciar visibles",
-    description: "Arranca los proyectos visibles con el modo que ya tenga cada uno.",
-    variant: "success",
-    onRun: ({ onBulkStartVisible }) => onBulkStartVisible(),
-  },
-  {
-    id: "start-service",
-    label: "Iniciar como service",
-    description: "Guarda service para los visibles y luego los arranca en lote.",
-    variant: "default",
-    onRun: ({ onBulkStartVisibleAsMode }) => onBulkStartVisibleAsMode("service"),
-  },
-  {
-    id: "start-record",
-    label: "Iniciar como record",
-    description: "Guarda record para los visibles y los levanta grabando tráfico.",
-    variant: "warning",
-    onRun: ({ onBulkStartVisibleAsMode }) => onBulkStartVisibleAsMode("record"),
-  },
-  {
-    id: "start-mock",
-    label: "Iniciar como mock",
-    description: "Guarda mock para los visibles y los levanta respondiendo desde capturas.",
-    variant: "default",
-    onRun: ({ onBulkStartVisibleAsMode }) => onBulkStartVisibleAsMode("mock"),
-  },
-  {
-    id: "stop-visible",
-    label: "Detener visibles",
-    description: "Solicita el stop normal para todos los proyectos visibles del catálogo.",
-    variant: "secondary",
-    onRun: ({ onBulkStopVisible }) => onBulkStopVisible(),
-  },
-  {
-    id: "force-visible",
-    label: "Forzar visibles",
-    description: "Ejecuta detención forzada sobre los proyectos visibles cuando haga falta.",
-    variant: "destructive",
-    onRun: ({ onBulkForceStopVisible }) => onBulkForceStopVisible(),
-  },
-];
-
 export function ProjectList({
   projects,
   selectedProjectId,
@@ -191,12 +139,68 @@ export function ProjectList({
   onBulkForceStopVisible,
   isBusy,
 }: ProjectListProps) {
+  const { t } = useTranslation();
   const [expandedProjectIds, setExpandedProjectIds] = useState<Record<string, boolean>>({});
   const [draggedProjectId, setDraggedProjectId] = useState<string | null>(null);
   const [dropTarget, setDropTarget] = useState<{ projectId: string; position: "before" | "after" } | null>(null);
   const [isBulkDialogOpen, setIsBulkDialogOpen] = useState(false);
   const forceStopSet = useMemo(() => new Set(forceStopProjectIds), [forceStopProjectIds]);
   const forceStartSet = useMemo(() => new Set(forceStartProjectIds), [forceStartProjectIds]);
+
+  // Build bulk actions reactively (labels/descriptions change with language)
+  const bulkActions = useMemo(
+    () => [
+      {
+        id: "start-visible",
+        label: t("bulk.startVisible_label"),
+        description: t("bulk.startVisible_desc"),
+        variant: "success" as const,
+        onRun: (props: Pick<ProjectListProps, "onBulkStartVisible" | "onBulkStartVisibleAsMode" | "onBulkStopVisible" | "onBulkForceStopVisible">) =>
+          props.onBulkStartVisible(),
+      },
+      {
+        id: "start-service",
+        label: t("bulk.startService_label"),
+        description: t("bulk.startService_desc"),
+        variant: "default" as const,
+        onRun: (props: Pick<ProjectListProps, "onBulkStartVisible" | "onBulkStartVisibleAsMode" | "onBulkStopVisible" | "onBulkForceStopVisible">) =>
+          props.onBulkStartVisibleAsMode("service"),
+      },
+      {
+        id: "start-record",
+        label: t("bulk.startRecord_label"),
+        description: t("bulk.startRecord_desc"),
+        variant: "warning" as const,
+        onRun: (props: Pick<ProjectListProps, "onBulkStartVisible" | "onBulkStartVisibleAsMode" | "onBulkStopVisible" | "onBulkForceStopVisible">) =>
+          props.onBulkStartVisibleAsMode("record"),
+      },
+      {
+        id: "start-mock",
+        label: t("bulk.startMock_label"),
+        description: t("bulk.startMock_desc"),
+        variant: "default" as const,
+        onRun: (props: Pick<ProjectListProps, "onBulkStartVisible" | "onBulkStartVisibleAsMode" | "onBulkStopVisible" | "onBulkForceStopVisible">) =>
+          props.onBulkStartVisibleAsMode("mock"),
+      },
+      {
+        id: "stop-visible",
+        label: t("bulk.stopVisible_label"),
+        description: t("bulk.stopVisible_desc"),
+        variant: "secondary" as const,
+        onRun: (props: Pick<ProjectListProps, "onBulkStartVisible" | "onBulkStartVisibleAsMode" | "onBulkStopVisible" | "onBulkForceStopVisible">) =>
+          props.onBulkStopVisible(),
+      },
+      {
+        id: "force-visible",
+        label: t("bulk.forceVisible_label"),
+        description: t("bulk.forceVisible_desc"),
+        variant: "destructive" as const,
+        onRun: (props: Pick<ProjectListProps, "onBulkStartVisible" | "onBulkStartVisibleAsMode" | "onBulkStopVisible" | "onBulkForceStopVisible">) =>
+          props.onBulkForceStopVisible(),
+      },
+    ],
+    [t],
+  );
 
   function toggleExpanded(projectId: string) {
     setExpandedProjectIds((current) => ({
@@ -299,8 +303,8 @@ export function ProjectList({
     <div className="surface-panel flex h-full min-h-0 flex-col overflow-hidden">
       <div className="surface-divider flex flex-wrap items-center justify-between gap-2 px-3 py-3">
         <div>
-          <p className="text-[9px] uppercase tracking-[0.22em] text-textSoft">Catálogo</p>
-          <h2 className="mt-0.5 text-[13px] font-semibold text-textStrong">Servicios configurados</h2>
+          <p className="text-[9px] uppercase tracking-[0.22em] text-textSoft">{t("catalog.section")}</p>
+          <h2 className="mt-0.5 text-[13px] font-semibold text-textStrong">{t("catalog.subtitle")}</h2>
         </div>
         <div className="flex flex-wrap items-center gap-1.5">
           <Button
@@ -309,10 +313,10 @@ export function ProjectList({
             size="sm"
             onClick={() => void openServiceTopologyWindow(selectedProjectId)}
             disabled={!projects.length}
-            title="Abrir el mapa visual de variables .env, enlaces y tráfico entre servicios"
+            title={t("catalog.mapTitle")}
           >
             <Network className="h-3.5 w-3.5" />
-            Mapa
+            {t("catalog.mapButton")}
           </Button>
           <Button
             type="button"
@@ -320,10 +324,10 @@ export function ProjectList({
             size="sm"
             onClick={() => setIsBulkDialogOpen(true)}
             disabled={!projects.length || isBusy}
-            title="Acciones masivas sobre los proyectos visibles del catálogo"
+            title={t("catalog.batchTitle")}
           >
             <Boxes className="h-3.5 w-3.5" />
-            Lote
+            {t("catalog.batchButton")}
           </Button>
           <Button
             type="button"
@@ -331,10 +335,10 @@ export function ProjectList({
             size="sm"
             onClick={onOpenScanDialog}
             disabled={isBusy}
-            title="Escanear una carpeta base e importar varios servicios"
+            title={t("catalog.scanTitle")}
           >
             <FolderSearch className="h-3.5 w-3.5" />
-            Escanear
+            {t("header.scan")}
           </Button>
           <Button
             type="button"
@@ -342,13 +346,13 @@ export function ProjectList({
             size="sm"
             onClick={() => void onImportProject()}
             disabled={isBusy}
-            title="Seleccionar una carpeta e importarla al catálogo"
+            title={t("catalog.addFolderTitle")}
           >
             {isBusy ? <LoaderCircle className="h-3.5 w-3.5 animate-spin" /> : <FolderPlus className="h-3.5 w-3.5" />}
-            Agregar carpeta
+            {t("catalog.addFolder")}
           </Button>
           <Badge variant="secondary" className="px-2 py-1 text-[10px]">
-            {projects.length} visibles
+            {t("catalog.visibleCount", { count: projects.length })}
           </Badge>
         </div>
       </div>
@@ -357,14 +361,14 @@ export function ProjectList({
         <table className="ui-data-table min-w-full border-separate border-spacing-y-0.5 text-[11px]">
           <thead className="sticky top-0 z-10 bg-panel/88 backdrop-blur-xl">
             <tr className="text-left text-[9px] uppercase tracking-[0.16em] text-textSoft shadow-[inset_0_-1px_0_rgb(var(--color-line)/0.14)]">
-              <th className="w-[44px] px-2 ">Run</th>
-              <th className="px-2 ">Servicio</th>
-              <th className="w-[58px] px-2 ">Port</th>
-              <th className="w-[72px] px-2 ">Mocks</th>
-              <th className="w-[48px] px-2 ">Ord</th>
-              <th className="w-[56px] px-2 ">Prev</th>
-              <th className="w-[88px] px-2 ">Estado</th>
-              <th className="w-[210px] px-2 ">Acc.</th>
+              <th className="w-[44px] px-2">{t("catalog.colRun")}</th>
+              <th className="px-2">{t("catalog.colService")}</th>
+              <th className="w-[58px] px-2">{t("catalog.colPort")}</th>
+              <th className="w-[72px] px-2">{t("catalog.colMocks")}</th>
+              <th className="w-[48px] px-2">{t("catalog.colOrder")}</th>
+              <th className="w-[56px] px-2">{t("catalog.colPrev")}</th>
+              <th className="w-[88px] px-2">{t("catalog.colStatus")}</th>
+              <th className="w-[210px] px-2">{t("catalog.colActions")}</th>
             </tr>
           </thead>
           <tbody>
@@ -402,7 +406,7 @@ export function ProjectList({
                       })}
                       onClick={() => onSelect(project.id)}
                     >
-                      <td className="px-2  align-middle">
+                      <td className="px-2 align-middle">
                         <Checkbox
                           checked={project.enabled}
                           onChange={(event) => {
@@ -410,10 +414,10 @@ export function ProjectList({
                             onToggleEnabled(project, event.currentTarget.checked);
                           }}
                           onClick={(event) => event.stopPropagation()}
-                          title="Incluir en Iniciar habilitados"
+                          title={t("catalog.enableTitle")}
                         />
                       </td>
-                      <td className="px-2  align-middle">
+                      <td className="px-2 align-middle">
                         <div className="flex min-w-0 items-center gap-1">
                           <button
                             type="button"
@@ -424,7 +428,7 @@ export function ProjectList({
                               setDraggedProjectId(project.id);
                             }}
                             onClick={(event) => event.stopPropagation()}
-                            title="Arrastrar para cambiar el orden de arranque"
+                            title={t("catalog.dragOrder")}
                           >
                             <GripVertical className="h-3 w-3" />
                           </button>
@@ -435,7 +439,7 @@ export function ProjectList({
                               event.stopPropagation();
                               toggleExpanded(project.id);
                             }}
-                            title={isExpanded ? "Ocultar detalle" : "Mostrar detalle"}
+                            title={isExpanded ? t("catalog.hideDetail") : t("catalog.showDetail")}
                           >
                             {isExpanded ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
                           </button>
@@ -453,14 +457,14 @@ export function ProjectList({
                           </div>
                         </div>
                       </td>
-                      <td className="px-2  align-middle text-[11px] leading-4 text-textStrong">{project.port ?? "n/a"}</td>
-                      <td className="px-2  align-middle">
+                      <td className="px-2 align-middle text-[11px] leading-4 text-textStrong">{project.port ?? "n/a"}</td>
+                      <td className="px-2 align-middle">
                         <Badge variant={project.mockSummary.totalCount ? "info" : "secondary"} className="min-w-[40px] justify-center px-1.5 py-0 text-[9px]">
                           {project.mockSummary.totalCount}
                         </Badge>
                       </td>
-                      <td className="px-2  align-middle text-[11px] leading-4 text-textStrong">{project.catalogOrder}</td>
-                      <td className="px-2  align-middle">
+                      <td className="px-2 align-middle text-[11px] leading-4 text-textStrong">{project.catalogOrder}</td>
+                      <td className="px-2 align-middle">
                         <Checkbox
                           checked={project.waitForPreviousReady}
                           onChange={(event) => {
@@ -468,13 +472,13 @@ export function ProjectList({
                             onToggleWaitForPreviousReady(project, event.currentTarget.checked);
                           }}
                           onClick={(event) => event.stopPropagation()}
-                          title="Esperar a que el servicio anterior quede ready antes de iniciar este"
+                          title={t("catalog.waitReadyTitle")}
                         />
                       </td>
-                      <td className="px-2  align-middle">
+                      <td className="px-2 align-middle">
                         <StatusPill status={project.status} />
                       </td>
-                      <td className="px-2  align-middle">
+                      <td className="px-2 align-middle">
                         <div className="flex flex-wrap gap-1">
                           <Button
                             type="button"
@@ -485,7 +489,7 @@ export function ProjectList({
                               event.stopPropagation();
                               onStartProject(project.id);
                             }}
-                            title="Iniciar proyecto"
+                            title={t("catalog.startProject")}
                           >
                             <Play className="h-3 w-3" />
                           </Button>
@@ -498,7 +502,7 @@ export function ProjectList({
                               event.stopPropagation();
                               onStopProject(project.id);
                             }}
-                            title="Detener proyecto"
+                            title={t("catalog.stopProject")}
                           >
                             <Square className="h-3 w-3" />
                           </Button>
@@ -512,9 +516,9 @@ export function ProjectList({
                                 event.stopPropagation();
                                 onForceStartProject(project.id);
                               }}
-                              title="Liberar puerto y volver a iniciar el proyecto"
+                              title={t("catalog.forceStartTitle")}
                             >
-                              Forzar e iniciar
+                              {t("catalog.forceStartBtn")}
                             </Button>
                           ) : null}
                           {!canForceStart && showForceStopAction ? (
@@ -527,9 +531,9 @@ export function ProjectList({
                                 event.stopPropagation();
                                 onForceStopProject(project.id);
                               }}
-                              title="Forzar detención del proyecto"
+                              title={t("catalog.forceStopTitle")}
                             >
-                              Forzar
+                              {t("catalog.forceStopBtn")}
                             </Button>
                           ) : null}
                           <Button
@@ -541,7 +545,7 @@ export function ProjectList({
                               event.stopPropagation();
                               onDeleteProject(project.id);
                             }}
-                            title="Quitar servicio del catálogo importado"
+                            title={t("catalog.removeTitle")}
                           >
                             <Trash2 className="h-3 w-3" />
                           </Button>
@@ -554,37 +558,37 @@ export function ProjectList({
                         <td colSpan={8} className="px-2 pb-1 pt-0">
                           <div className="surface-panel-soft grid gap-1 px-2 py-1 text-[10px] leading-4 text-textMuted md:grid-cols-[minmax(0,1.9fr)_minmax(0,1.15fr)_minmax(0,1fr)]">
                             <div className="min-w-0">
-                              <p className="text-[9px] uppercase tracking-[0.14em] text-textSoft">Ruta</p>
+                              <p className="text-[9px] uppercase tracking-[0.14em] text-textSoft">{t("catalog.expandPath")}</p>
                               <p className="truncate text-textMuted" title={project.rootPath}>
                                 {project.rootPath}
                               </p>
                             </div>
                             <div className="min-w-0">
-                              <p className="text-[9px] uppercase tracking-[0.14em] text-textSoft">Run target</p>
+                              <p className="text-[9px] uppercase tracking-[0.14em] text-textSoft">{t("catalog.expandRunTarget")}</p>
                               <p className="truncate text-textMuted" title={project.runTarget}>
                                 {project.packageManager} / {project.runMode === "script" ? "script" : "command"} / {project.runTarget}
                               </p>
                             </div>
                             <div className="min-w-0">
-                              <p className="text-[9px] uppercase tracking-[0.14em] text-textSoft">.env</p>
-                              <p className="truncate text-textMuted" title={project.selectedEnvFile ?? "Sin .env"}>
-                                {project.selectedEnvFile ?? "Sin .env"}
+                              <p className="text-[9px] uppercase tracking-[0.14em] text-textSoft">{t("catalog.expandEnv")}</p>
+                              <p className="truncate text-textMuted" title={project.selectedEnvFile ?? t("catalog.expandNoEnv")}>
+                                {project.selectedEnvFile ?? t("catalog.expandNoEnv")}
                               </p>
                             </div>
                             <div className="min-w-0">
-                              <p className="text-[9px] uppercase tracking-[0.14em] text-textSoft">Arranque</p>
-                              <p className="truncate text-textMuted" title={`Orden ${project.catalogOrder} · fase ${project.startupPhase}`}>
-                                #{project.catalogOrder} / fase {project.startupPhase} / {project.launchMode} / {project.waitForPreviousReady ? "espera ready del anterior" : "sin espera"}
+                              <p className="text-[9px] uppercase tracking-[0.14em] text-textSoft">{t("catalog.expandStartup")}</p>
+                              <p className="truncate text-textMuted" title={`Order ${project.catalogOrder} · phase ${project.startupPhase}`}>
+                                #{project.catalogOrder} / {project.startupPhase} / {project.launchMode} / {project.waitForPreviousReady ? t("catalog.expandWaitReady") : t("catalog.expandNoWait")}
                               </p>
                             </div>
                             <div className="min-w-0">
-                              <p className="text-[9px] uppercase tracking-[0.14em] text-textSoft">Recursos</p>
+                              <p className="text-[9px] uppercase tracking-[0.14em] text-textSoft">{t("catalog.expandResources")}</p>
                               {resourceUsage ? (
-                                <p className="truncate text-textMuted" title={resourceUsage.commandPreview ?? "Sin comando"}>
+                                <p className="truncate text-textMuted" title={resourceUsage.commandPreview ?? t("catalog.expandNoProcess")}>
                                   PID {resourceUsage.trackedPid ?? "n/a"} / {resourceUsage.totalProcesses} proc / {resourceUsage.totalWorkingSetMb.toFixed(1)} MB
                                 </p>
                               ) : (
-                                <p className="truncate text-textMuted">Sin proceso rastreado</p>
+                                <p className="truncate text-textMuted">{t("catalog.expandNoProcess")}</p>
                               )}
                             </div>
                           </div>
@@ -598,8 +602,8 @@ export function ProjectList({
               <tr>
                 <td colSpan={8} className="px-2 py-6">
                   <EmptyState
-                    title="No hay proyectos visibles"
-                    description="Importa una carpeta o ejecuta un escaneo para poblar el catálogo."
+                    title={t("catalog.emptyTitle")}
+                    description={t("catalog.emptyDesc")}
                   />
                 </td>
               </tr>
@@ -611,8 +615,8 @@ export function ProjectList({
       <DialogShell
         open={isBulkDialogOpen}
         onOpenChange={setIsBulkDialogOpen}
-        title="Acciones del catálogo"
-        description={`Ejecuta cambios masivos sobre los ${projects.length} proyectos visibles sin ir uno por uno.`}
+        title={t("bulk.title")}
+        description={t("bulk.subtitle", { count: projects.length })}
       >
         <div className="grid gap-2 md:grid-cols-2">
           {bulkActions.map((action) => (

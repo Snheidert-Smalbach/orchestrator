@@ -1,6 +1,7 @@
 import { FolderPlus, FolderSearch, LoaderCircle, ScanSearch } from "lucide-react";
 import { useEffect, useState } from "react";
 import type { DetectedProject } from "../lib/types";
+import { useTranslation } from "../i18n";
 import { Button } from "./ui/button";
 import { Card } from "./ui/card";
 import { Checkbox } from "./ui/checkbox";
@@ -32,6 +33,7 @@ export function ScanDialog({
   onImport,
   onImportSingle,
 }: Props) {
+  const { t } = useTranslation();
   const [rootPath, setRootPath] = useState(defaultRoot);
   const [recursive, setRecursive] = useState(false);
   const [selectedPaths, setSelectedPaths] = useState<string[]>([]);
@@ -48,16 +50,16 @@ export function ScanDialog({
     <DialogShell
       open={open}
       onOpenChange={onOpenChange}
-      title="Escanear proyectos locales"
-      description="Detecta la carpeta seleccionada y también sus subcarpetas inmediatas para importarlas al catálogo."
+      title={t("scan.title")}
+      description={t("scan.description")}
       widthClassName="w-[min(980px,92vw)]"
       bodyClassName="max-h-[84vh] overflow-auto"
     >
       <div className="grid gap-4 md:grid-cols-[1fr_auto_auto_auto]">
         <FieldLabelWrap>
-          <FieldLabel>Root</FieldLabel>
+          <FieldLabel>{t("scan.rootLabel")}</FieldLabel>
           <Input value={rootPath} onChange={(event) => setRootPath(event.target.value)} />
-          <FieldHint>Usa una carpeta base para detectar servicios y preparar una importación en lote.</FieldHint>
+          <FieldHint>{t("scan.rootHint")}</FieldHint>
         </FieldLabelWrap>
 
         <Button
@@ -73,14 +75,14 @@ export function ScanDialog({
           }}
         >
           <FolderSearch className="h-4 w-4" />
-          Elegir
+          {t("scan.pickBtn")}
         </Button>
 
         <label className="ui-inline-option mt-auto">
           <Checkbox checked={recursive} onChange={(event) => setRecursive(event.currentTarget.checked)} />
           <span>
-            <span className="block text-[11px] font-semibold text-textStrong">Recursivo</span>
-            <span className="block text-[10px] text-textMuted">Explora más profundidad del root.</span>
+            <span className="block text-[11px] font-semibold text-textStrong">{t("scan.recursiveLabel")}</span>
+            <span className="block text-[10px] text-textMuted">{t("scan.recursiveDesc")}</span>
           </span>
         </label>
 
@@ -98,20 +100,20 @@ export function ScanDialog({
           }}
         >
           <FolderPlus className="h-4 w-4" />
-          Agregar uno
+          {t("scan.addOneBtn")}
         </Button>
       </div>
 
       <div className="mt-4 flex flex-wrap items-center justify-between gap-2">
         <p className="text-[11px] text-textMuted">
           {detectedProjects.length
-            ? `${selectedPaths.length} de ${detectedProjects.length} candidatos listos para importar.`
-            : "Aún no hay proyectos detectados."}
+            ? t("scan.candidatesReady", { selected: String(selectedPaths.length), total: String(detectedProjects.length) })
+            : t("scan.noDetected")}
         </p>
         <div className="flex flex-wrap gap-2">
           <Button type="button" variant="secondary" size="sm" onClick={() => void onScan(rootPath, recursive)} busy={busy}>
             {busy ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <ScanSearch className="h-4 w-4" />}
-            Escanear
+            {t("scan.scanBtn")}
           </Button>
           <Button
             type="button"
@@ -121,7 +123,7 @@ export function ScanDialog({
             disabled={!detectedProjects.length}
           >
             <FolderSearch className="h-4 w-4" />
-            Importar seleccionados
+            {t("scan.importSelected")}
           </Button>
         </div>
       </div>
@@ -142,24 +144,26 @@ export function ScanDialog({
                         </span>
                         <span className="ui-badge ui-badge--info">{project.packageManager}</span>
                         <span className="ui-badge ui-badge--secondary">
-                          {project.alreadyImported ? "ya importado" : "nuevo"}
+                          {project.alreadyImported ? t("scan.alreadyTag") : t("scan.newTag")}
                         </span>
                       </div>
                       <p className="mt-1 text-[11px] text-textMuted">{project.rootPath}</p>
                       <div className="mt-3 grid gap-2 md:grid-cols-3">
                         <div>
-                          <p className="text-[9px] uppercase tracking-[0.14em] text-textSoft">Comando sugerido</p>
+                          <p className="text-[9px] uppercase tracking-[0.14em] text-textSoft">{t("scan.suggestedCommand")}</p>
                           <p className="mt-1 text-[11px] text-textStrong">
                             {project.suggestedRunMode === "script" ? "script" : "command"} / {project.suggestedRunTarget}
                           </p>
                         </div>
                         <div>
-                          <p className="text-[9px] uppercase tracking-[0.14em] text-textSoft">Puerto</p>
+                          <p className="text-[9px] uppercase tracking-[0.14em] text-textSoft">{t("scan.port")}</p>
                           <p className="mt-1 text-[11px] text-textStrong">{project.suggestedPort ?? "n/a"}</p>
                         </div>
                         <div>
-                          <p className="text-[9px] uppercase tracking-[0.14em] text-textSoft">Estado</p>
-                          <p className="mt-1 text-[11px] text-textStrong">{project.alreadyImported ? "Importado" : "Disponible"}</p>
+                          <p className="text-[9px] uppercase tracking-[0.14em] text-textSoft">{t("scan.statusLabel")}</p>
+                          <p className="mt-1 text-[11px] text-textStrong">
+                            {project.alreadyImported ? t("scan.alreadyImported") : t("scan.available")}
+                          </p>
                         </div>
                       </div>
                     </div>
@@ -177,9 +181,9 @@ export function ScanDialog({
                         }
                       />
                       <span>
-                        <span className="block text-[11px] font-semibold text-textStrong">Importar</span>
+                        <span className="block text-[11px] font-semibold text-textStrong">{t("scan.importLabel")}</span>
                         <span className="block text-[10px] text-textMuted">
-                          {project.alreadyImported ? "Ya está en el catálogo" : "Se incluirá en la importación"}
+                          {project.alreadyImported ? t("scan.alreadyInCatalog") : t("scan.willBeIncluded")}
                         </span>
                       </span>
                     </label>
@@ -191,8 +195,8 @@ export function ScanDialog({
         ) : (
           <EmptyState
             icon={<ScanSearch className="h-4 w-4" />}
-            title="Todavía no hay resultados"
-            description="Lanza un escaneo para ver proyectos detectados e importarlos al catálogo."
+            title={t("scan.emptyTitle")}
+            description={t("scan.emptyDesc")}
           />
         )}
       </div>

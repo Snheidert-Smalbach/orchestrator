@@ -2,6 +2,7 @@ import { Plus, RefreshCw, Save, Trash2 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { deleteAllProjectMocks, deleteProjectMock, getProjectMocks, saveProjectMock } from "../lib/tauri";
 import type { MockHeader, MockKind, Project, ProjectMock, ProjectMockCollection } from "../lib/types";
+import { useTranslation } from "../i18n";
 import { useAppStore } from "../store/useAppStore";
 import { Badge } from "./ui/badge";
 import { Button } from "./ui/button";
@@ -40,17 +41,17 @@ function createMockId() {
   return `mock-${Math.random().toString(36).slice(2, 10)}`;
 }
 
-function createEmptyMock(kind: Extract<MockKind, "rest" | "graphql">): ProjectMock {
+function createEmptyMock(kind: Extract<MockKind, "rest" | "graphql">, name: string): ProjectMock {
   const isGraphql = kind === "graphql";
   return {
     id: createMockId(),
-    name: isGraphql ? "Nuevo mock GraphQL" : "Nuevo mock REST",
+    name,
     source: "manual",
     kind,
     recordedAt: new Date().toISOString(),
     notes: null,
     requestMethod: isGraphql ? "POST" : "GET",
-    requestPath: isGraphql ? "/graphql" : "/api/recurso",
+    requestPath: isGraphql ? "/graphql" : "/api/resource",
     requestQuery: "",
     requestHeaders: [],
     requestContentType: "application/json",
@@ -81,7 +82,7 @@ function splitHeaderLine(line: string) {
   };
 }
 
-function textToHeaders(text: string) {
+function textToHeaders(text: string, invalidHeaderMessage: (line: string) => string): MockHeader[] {
   return text
     .split("\n")
     .map((line) => line.trim())
@@ -89,7 +90,7 @@ function textToHeaders(text: string) {
     .map((line) => {
       const parsed = splitHeaderLine(line);
       if (!parsed?.name) {
-        throw new Error(`Encabezado inválido: ${line}`);
+        throw new Error(invalidHeaderMessage(line));
       }
 
       return parsed satisfies MockHeader;
@@ -138,9 +139,9 @@ function createEditorState(mock: ProjectMock): MockEditorState {
   };
 }
 
-function formatTimestamp(value: string | null) {
+function formatTimestamp(value: string | null, noDateLabel: string, locale: string) {
   if (!value) {
-    return "sin fecha";
+    return noDateLabel;
   }
 
   const date = new Date(value);
@@ -148,7 +149,7 @@ function formatTimestamp(value: string | null) {
     return value;
   }
 
-  return date.toLocaleString("es-CO", {
+  return date.toLocaleString(locale, {
     day: "2-digit",
     month: "2-digit",
     hour: "2-digit",
@@ -156,9 +157,13 @@ function formatTimestamp(value: string | null) {
   });
 }
 
-function buildMockFromEditor(editor: MockEditorState): ProjectMock {
-  const requestHeaders = textToHeaders(editor.requestHeadersText);
-  const responseHeaders = textToHeaders(editor.responseHeadersText);
+function buildMockFromEditor(
+  editor: MockEditorState,
+  invalidHeaderMessage: (line: string) => string,
+  graphqlMissingQueryMessage: string,
+): ProjectMock {
+  const requestHeaders = textToHeaders(editor.requestHeadersText, invalidHeaderMessage);
+  const responseHeaders = textToHeaders(editor.responseHeadersText, invalidHeaderMessage);
   const mock = {
     ...editor.mock,
     requestHeaders,
@@ -173,7 +178,7 @@ function buildMockFromEditor(editor: MockEditorState): ProjectMock {
 
   if (mock.kind === "graphql") {
     if (!editor.graphqlQuery.trim()) {
-      throw new Error("El mock GraphQL necesita una query.");
+      throw new Error(graphqlMissingQueryMessage);
     }
 
     let variables: unknown = {};
@@ -201,11 +206,8 @@ function buildMockFromEditor(editor: MockEditorState): ProjectMock {
   return mock;
 }
 
-function countLabel(count: number, singular: string, plural = `${singular}s`) {
-  return `${count} ${count === 1 ? singular : plural}`;
-}
-
 export function ProjectMocksEditor({ project }: { project: Project }) {
+  const { t, language } = useTranslation();
   const patchProjectMockSummary = useAppStore((state) => state.patchProjectMockSummary);
   const [collection, setCollection] = useState<ProjectMockCollection>({
     summary: project.mockSummary,
@@ -220,6 +222,13 @@ export function ProjectMocksEditor({ project }: { project: Project }) {
   const [error, setError] = useState<string | null>(null);
   const editorViewportRef = useRef<HTMLDivElement | null>(null);
   const listItemRefs = useRef<Record<string, HTMLButtonElement | null>>({});
+
+  const dateLocale = language === "es" ? "es-CO" : "en-US";
+  const noDateLabel = t("mocks.noDate");
+
+  function getInvalidHeaderMessage(line: string) {
+    return t("mocks.invalidHeader", { line });
+  }
 
   async function refreshMocks(preferredMockId?: string | null) {
     setIsLoading(true);
@@ -237,7 +246,7 @@ export function ProjectMocksEditor({ project }: { project: Project }) {
       setCollection({ summary: emptySummary(), mocks: [] });
       setEditor(null);
       setSelectedMockId(null);
-      setError(loadError instanceof Error ? loadError.message : "No fue posible cargar los mocks.");
+      setError(loadError instanceof Error ? loadError.message : t("mocks.errorLoad"));
     } finally {
       setIsLoading(false);
     }
@@ -270,8 +279,9 @@ export function ProjectMocksEditor({ project }: { project: Project }) {
   }
 
   function handleCreate(kind: Extract<MockKind, "rest" | "graphql">) {
+    const defaultName = kind === "graphql" ? "New GraphQL mock" : "New REST mock";
     setSelectedMockId(null);
-    setEditor(createEditorState(createEmptyMock(kind)));
+    setEditor(createEditorState(createEmptyMock(kind, defaultName)));
     setError(null);
   }
 
@@ -284,7 +294,11 @@ export function ProjectMocksEditor({ project }: { project: Project }) {
     setError(null);
 
     try {
-      const savedMock = buildMockFromEditor(editor);
+      const savedMock = buildMockFromEditor(
+        editor,
+        getInvalidHeaderMessage,
+        t("mocks.graphqlMissingQuery"),
+      );
       const nextCollection = await saveProjectMock(project.id, savedMock);
       setCollection(nextCollection);
       patchProjectMockSummary(project.id, nextCollection.summary);
@@ -293,7 +307,7 @@ export function ProjectMocksEditor({ project }: { project: Project }) {
       setSelectedMockId(persistedMock?.id ?? null);
       setEditor(persistedMock ? createEditorState(persistedMock) : null);
     } catch (saveError) {
-      setError(saveError instanceof Error ? saveError.message : "No fue posible guardar el mock.");
+      setError(saveError instanceof Error ? saveError.message : t("mocks.errorSave"));
     } finally {
       setIsSaving(false);
     }
@@ -321,7 +335,7 @@ export function ProjectMocksEditor({ project }: { project: Project }) {
       setSelectedMockId(nextSelectedMock?.id ?? null);
       setEditor(nextSelectedMock ? createEditorState(nextSelectedMock) : null);
     } catch (deleteError) {
-      setError(deleteError instanceof Error ? deleteError.message : "No fue posible eliminar el mock.");
+      setError(deleteError instanceof Error ? deleteError.message : t("mocks.errorDelete"));
     } finally {
       setIsDeleting(false);
     }
@@ -342,7 +356,7 @@ export function ProjectMocksEditor({ project }: { project: Project }) {
       setSelectedMockId(null);
       setEditor(null);
     } catch (deleteError) {
-      setError(deleteError instanceof Error ? deleteError.message : "No fue posible eliminar todos los mocks.");
+      setError(deleteError instanceof Error ? deleteError.message : t("mocks.errorDeleteAll"));
     } finally {
       setIsClearingAll(false);
     }
@@ -352,20 +366,26 @@ export function ProjectMocksEditor({ project }: { project: Project }) {
     ? `${editor.mock.requestMethod} ${editor.mock.requestPath}${editor.mock.requestQuery ? `?${editor.mock.requestQuery}` : ""}`
     : null;
 
+  const summary = t(
+    collection.summary.totalCount === 1 ? "mocks.summary" : "mocks.summaryPlural",
+    {
+      total: String(collection.summary.totalCount),
+      manual: String(collection.summary.manualCount),
+      captured: String(collection.summary.capturedCount),
+    },
+  );
+
   return (
     <section className="flex h-full min-h-0 flex-col overflow-hidden">
       <div className="surface-panel-soft flex shrink-0 flex-wrap items-center justify-between gap-2 px-3 py-2">
         <div className="min-w-0">
-          <p className="text-[10px] uppercase tracking-[0.16em] text-textSoft">Mocks del servicio</p>
-          <p className="mt-0.5 truncate text-[11px] text-textMuted">
-            {countLabel(collection.summary.totalCount, "mock")} | {countLabel(collection.summary.manualCount, "manual")} |{" "}
-            {countLabel(collection.summary.capturedCount, "capturado", "capturados")}
-          </p>
+          <p className="text-[10px] uppercase tracking-[0.16em] text-textSoft">{t("mocks.section")}</p>
+          <p className="mt-0.5 truncate text-[11px] text-textMuted">{summary}</p>
         </div>
         <div className="flex flex-wrap items-center gap-1.5">
           <Button type="button" variant="secondary" size="sm" onClick={() => void refreshMocks(selectedMockId)} disabled={isLoading}>
             <RefreshCw className={["h-3 w-3", isLoading ? "animate-spin" : ""].join(" ")} />
-            Refrescar
+            {t("mocks.refreshBtn")}
           </Button>
           <Button
             type="button"
@@ -375,15 +395,15 @@ export function ProjectMocksEditor({ project }: { project: Project }) {
             disabled={isClearingAll || !collection.summary.totalCount}
           >
             <Trash2 className="h-3 w-3" />
-            {isClearingAll ? "Eliminando..." : "Eliminar todos"}
+            {isClearingAll ? t("mocks.deletingAll") : t("mocks.deleteAllBtn")}
           </Button>
           <Button type="button" variant="default" size="sm" onClick={() => handleCreate("rest")}>
             <Plus className="h-3 w-3" />
-            REST
+            {t("mocks.newRestBtn")}
           </Button>
           <Button type="button" variant="secondary" size="sm" onClick={() => handleCreate("graphql")} className="text-info">
             <Plus className="h-3 w-3" />
-            GraphQL
+            {t("mocks.newGraphqlBtn")}
           </Button>
         </div>
       </div>
@@ -396,7 +416,7 @@ export function ProjectMocksEditor({ project }: { project: Project }) {
               <Badge variant="secondary">{collection.summary.restCount} rest</Badge>
             </div>
             <span className="text-[9px] uppercase tracking-[0.14em] text-textSoft">
-              {formatTimestamp(collection.summary.lastUpdatedAt)}
+              {formatTimestamp(collection.summary.lastUpdatedAt, noDateLabel, dateLocale)}
             </span>
           </div>
 
@@ -441,7 +461,10 @@ export function ProjectMocksEditor({ project }: { project: Project }) {
                   </button>
                 ))
               ) : (
-                <EmptyState title="No hay mocks todavía" description="Crea uno manual o refresca para cargar capturas existentes." />
+                <EmptyState
+                  title={t("mocks.emptyTitle")}
+                  description={t("mocks.emptyDesc")}
+                />
               )}
             </div>
           </div>
@@ -455,18 +478,22 @@ export function ProjectMocksEditor({ project }: { project: Project }) {
                   <p className="truncate text-[11px] font-semibold text-textStrong">{editor.mock.name}</p>
                   <p className="mt-0.5 truncate text-[10px] text-textMuted">{selectedDescriptor}</p>
                   <p className="mt-0.5 text-[10px] text-textSoft">
-                    {selectedMockId ? (editor.mock.source === "manual" ? "manual" : "capturado") : "nuevo"} |{" "}
-                    {formatTimestamp(editor.mock.recordedAt)}
+                    {selectedMockId
+                      ? editor.mock.source === "manual"
+                        ? t("mocks.sourceManual")
+                        : t("mocks.sourceCaptured")
+                      : t("mocks.sourceNew")}{" "}
+                    | {formatTimestamp(editor.mock.recordedAt, noDateLabel, dateLocale)}
                   </p>
                 </div>
                 <div className="flex shrink-0 flex-wrap gap-1.5">
                   <Button type="button" variant="destructive" size="sm" onClick={() => void handleDelete()} disabled={isDeleting}>
                     <Trash2 className="h-3 w-3" />
-                    {selectedMockId ? "Eliminar" : "Descartar"}
+                    {selectedMockId ? t("mocks.deleteBtn") : t("mocks.discardBtn")}
                   </Button>
                   <Button type="button" variant="default" size="sm" onClick={() => void handleSave()} disabled={isSaving}>
                     <Save className="h-3 w-3" />
-                    {isSaving ? "Guardando" : "Guardar"}
+                    {isSaving ? t("mocks.savingBtn") : t("mocks.saveBtn")}
                   </Button>
                 </div>
               </div>
@@ -475,14 +502,14 @@ export function ProjectMocksEditor({ project }: { project: Project }) {
                 <div className="grid gap-2.5">
                   <div className="grid gap-2 xl:grid-cols-[minmax(0,1fr)_120px_120px]">
                     <FieldLabelWrap>
-                      <FieldLabel>Nombre</FieldLabel>
+                      <FieldLabel>{t("mocks.nameLabel")}</FieldLabel>
                       <Input
                         value={editor.mock.name}
                         onChange={(event) => setEditor({ ...editor, mock: { ...editor.mock, name: event.target.value } })}
                       />
                     </FieldLabelWrap>
                     <FieldLabelWrap>
-                      <FieldLabel>Tipo</FieldLabel>
+                      <FieldLabel>{t("mocks.typeLabel")}</FieldLabel>
                       <Select
                         value={editor.mock.kind}
                         onChange={(event) => {
@@ -499,7 +526,7 @@ export function ProjectMocksEditor({ project }: { project: Project }) {
                                 kind: nextKind,
                                 requestMethod: nextKind === "graphql" ? "POST" : current.mock.requestMethod,
                                 requestPath:
-                                  nextKind === "graphql" && current.mock.requestPath === "/api/recurso"
+                                  nextKind === "graphql" && current.mock.requestPath === "/api/resource"
                                     ? "/graphql"
                                     : current.mock.requestPath,
                                 requestContentType: "application/json",
@@ -525,7 +552,7 @@ export function ProjectMocksEditor({ project }: { project: Project }) {
                       </Select>
                     </FieldLabelWrap>
                     <FieldLabelWrap>
-                      <FieldLabel>Status</FieldLabel>
+                      <FieldLabel>{t("mocks.statusLabel")}</FieldLabel>
                       <Input
                         type="number"
                         value={editor.mock.responseStatusCode}
@@ -544,7 +571,7 @@ export function ProjectMocksEditor({ project }: { project: Project }) {
 
                   <div className="grid gap-2 xl:grid-cols-[90px_minmax(0,1fr)_minmax(0,0.8fr)]">
                     <FieldLabelWrap>
-                      <FieldLabel>Método</FieldLabel>
+                      <FieldLabel>{t("mocks.methodLabel")}</FieldLabel>
                       <Input
                         value={editor.mock.requestMethod}
                         onChange={(event) =>
@@ -557,7 +584,7 @@ export function ProjectMocksEditor({ project }: { project: Project }) {
                       />
                     </FieldLabelWrap>
                     <FieldLabelWrap>
-                      <FieldLabel>Path</FieldLabel>
+                      <FieldLabel>{t("mocks.pathLabel")}</FieldLabel>
                       <Input
                         value={editor.mock.requestPath}
                         onChange={(event) =>
@@ -569,7 +596,7 @@ export function ProjectMocksEditor({ project }: { project: Project }) {
                       />
                     </FieldLabelWrap>
                     <FieldLabelWrap>
-                      <FieldLabel>Query string</FieldLabel>
+                      <FieldLabel>{t("mocks.queryLabel")}</FieldLabel>
                       <Input
                         value={editor.mock.requestQuery}
                         onChange={(event) =>
@@ -585,12 +612,12 @@ export function ProjectMocksEditor({ project }: { project: Project }) {
                   {editor.mock.kind === "graphql" ? (
                     <div className="grid gap-2 xl:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)]">
                       <FieldLabelWrap>
-                        <FieldLabel>Query GraphQL</FieldLabel>
+                        <FieldLabel>{t("mocks.graphqlQueryLabel")}</FieldLabel>
                         <Textarea rows={8} value={editor.graphqlQuery} onChange={(event) => setEditor({ ...editor, graphqlQuery: event.target.value })} />
                       </FieldLabelWrap>
                       <div className="grid gap-2">
                         <FieldLabelWrap>
-                          <FieldLabel>Variables JSON</FieldLabel>
+                          <FieldLabel>{t("mocks.variablesLabel")}</FieldLabel>
                           <Textarea
                             rows={6}
                             value={editor.graphqlVariablesText}
@@ -598,7 +625,7 @@ export function ProjectMocksEditor({ project }: { project: Project }) {
                           />
                         </FieldLabelWrap>
                         <FieldLabelWrap>
-                          <FieldLabel>Operation</FieldLabel>
+                          <FieldLabel>{t("mocks.operationLabel")}</FieldLabel>
                           <Input
                             value={editor.graphqlOperationName}
                             onChange={(event) => setEditor({ ...editor, graphqlOperationName: event.target.value })}
@@ -608,7 +635,7 @@ export function ProjectMocksEditor({ project }: { project: Project }) {
                     </div>
                   ) : (
                     <FieldLabelWrap>
-                      <FieldLabel>Body request</FieldLabel>
+                      <FieldLabel>{t("mocks.bodyRequestLabel")}</FieldLabel>
                       <Textarea
                         rows={5}
                         value={editor.mock.requestBody}
@@ -624,7 +651,7 @@ export function ProjectMocksEditor({ project }: { project: Project }) {
 
                   <div className="grid gap-2 xl:grid-cols-2">
                     <FieldLabelWrap>
-                      <FieldLabel>Headers request</FieldLabel>
+                      <FieldLabel>{t("mocks.headersRequestLabel")}</FieldLabel>
                       <Textarea
                         rows={4}
                         placeholder={"Authorization: Bearer ...\nX-Tenant: demo"}
@@ -633,7 +660,7 @@ export function ProjectMocksEditor({ project }: { project: Project }) {
                       />
                     </FieldLabelWrap>
                     <FieldLabelWrap>
-                      <FieldLabel>Headers response</FieldLabel>
+                      <FieldLabel>{t("mocks.headersResponseLabel")}</FieldLabel>
                       <Textarea
                         rows={4}
                         placeholder="Content-Type: application/json"
@@ -645,7 +672,7 @@ export function ProjectMocksEditor({ project }: { project: Project }) {
 
                   <div className="grid gap-2 xl:grid-cols-[minmax(0,1fr)_180px]">
                     <FieldLabelWrap>
-                      <FieldLabel>Body response</FieldLabel>
+                      <FieldLabel>{t("mocks.bodyResponseLabel")}</FieldLabel>
                       <Textarea
                         rows={7}
                         value={editor.mock.responseBody}
@@ -659,7 +686,7 @@ export function ProjectMocksEditor({ project }: { project: Project }) {
                     </FieldLabelWrap>
                     <FieldGroup>
                       <FieldLabelWrap>
-                        <FieldLabel>Reason</FieldLabel>
+                        <FieldLabel>{t("mocks.reasonLabel")}</FieldLabel>
                         <Input
                           value={editor.mock.responseReasonPhrase}
                           onChange={(event) =>
@@ -674,7 +701,7 @@ export function ProjectMocksEditor({ project }: { project: Project }) {
                         />
                       </FieldLabelWrap>
                       <FieldLabelWrap>
-                        <FieldLabel>Notas</FieldLabel>
+                        <FieldLabel>{t("mocks.notesLabel")}</FieldLabel>
                         <Textarea
                           rows={4}
                           value={editor.mock.notes ?? ""}
@@ -696,8 +723,8 @@ export function ProjectMocksEditor({ project }: { project: Project }) {
           ) : (
             <div className="flex h-full min-h-[220px] items-center justify-center px-4">
               <EmptyState
-                title="Selecciona un mock"
-                description="Elige un item de la lista o crea uno nuevo para editar request, headers y response."
+                title={t("mocks.noMockSelected")}
+                description={t("mocks.noMockSelectedDesc")}
               />
             </div>
           )}

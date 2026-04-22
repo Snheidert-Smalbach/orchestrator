@@ -33,6 +33,7 @@ import {
 import { getDefaultRoot, pickRootFromDialog } from "./lib/tauri";
 import type { Project } from "./lib/types";
 import { useAppStore } from "./store/useAppStore";
+import { useTranslation } from "./i18n";
 
 function quickProfileIcon(profileId: string) {
   switch (profileId) {
@@ -48,6 +49,7 @@ function quickProfileIcon(profileId: string) {
 }
 
 export default function App() {
+  const { t } = useTranslation();
   const [themeMode, setThemeMode] = useState<ThemeMode>(resolveInitialThemeMode);
   const [themeFamily, setThemeFamily] = useState(resolveInitialThemeFamily);
   const topologyWindowParams =
@@ -150,7 +152,7 @@ export default function App() {
   const activeTheme = THEME_DEFINITIONS.find((theme) => theme.id === themeFamily) ?? THEME_DEFINITIONS[0] ?? {
     id: DEFAULT_THEME_FAMILY,
     label: "Aurora",
-    description: "",
+    description: "theme.aurora_desc",
     preview: ["#23d5f6", "#8bff4d", "#0f172a"] as [string, string, string],
   };
   const quickProfiles = buildQuickProfiles(visibleProjects, selectedProject?.id ?? selectedProjectId);
@@ -167,8 +169,8 @@ export default function App() {
       entries.push({
         id: "port-conflicts",
         tone: "warn",
-        title: "Conflictos de puerto",
-        description: `Hay ${conflictedProjectIds.size} proyectos visibles con puertos duplicados. Ajusta esos servicios antes de iniciar en lote.`,
+        title: t("alerts.portConflicts_title"),
+        description: t("alerts.portConflicts_desc", { count: conflictedProjectIds.size }),
       });
     }
 
@@ -176,8 +178,8 @@ export default function App() {
       entries.push({
         id: "force-start",
         tone: "warn",
-        title: "Puertos ocupados",
-        description: `Hay ${forceStartProjectIds.length} servicios que no arrancaron porque su puerto ya estaba tomado.`,
+        title: t("alerts.occupiedPorts_title"),
+        description: t("alerts.occupiedPorts_desc", { count: forceStartProjectIds.length }),
       });
     }
 
@@ -185,8 +187,8 @@ export default function App() {
       entries.push({
         id: "force-stop",
         tone: "danger",
-        title: "Procesos pendientes de cierre",
-        description: `Hay ${forceStopProjectIds.length} servicios que necesitan detención forzada para liberar PID o puerto.`,
+        title: t("alerts.pendingStop_title"),
+        description: t("alerts.pendingStop_desc", { count: forceStopProjectIds.length }),
       });
     }
 
@@ -194,7 +196,7 @@ export default function App() {
       entries.push({
         id: "external-node",
         tone: "info",
-        title: "Node externos pesados",
+        title: t("alerts.externalNode_title"),
         description: topExternalNodes.map(describeNodeProcess).join(" | "),
       });
     }
@@ -203,13 +205,13 @@ export default function App() {
       entries.push({
         id: "last-error",
         tone: "danger",
-        title: "Último error",
+        title: t("alerts.lastError_title"),
         description: error,
       });
     }
 
     return entries;
-  }, [conflictedProjectIds, error, forceStartProjectIds.length, forceStopProjectIds.length, topExternalNodes]);
+  }, [conflictedProjectIds, error, forceStartProjectIds.length, forceStopProjectIds.length, topExternalNodes, t]);
 
   async function handleCreateWorkspace() {
     const name = workspaceNameDraft.trim();
@@ -406,14 +408,14 @@ export default function App() {
       <DialogShell
         open={isWorkspaceCreatorOpen}
         onOpenChange={setIsWorkspaceCreatorOpen}
-        title="Nuevo workspace"
-        description="Crea una pestaña personalizada y, si hay un proyecto seleccionado, precárgalo para arrancar más rápido."
+        title={t("workspaceCreator.title")}
+        description={t("workspaceCreator.description")}
       >
         <div className="grid gap-4">
           <FieldLabelWrap>
-            <FieldLabel>Nombre</FieldLabel>
+            <FieldLabel>{t("workspaceCreator.nameLabel")}</FieldLabel>
             <Input
-              placeholder="Nuevo workspace"
+              placeholder={t("workspaceCreator.namePlaceholder")}
               value={workspaceNameDraft}
               onChange={(event) => setWorkspaceNameDraft(event.target.value)}
               onKeyDown={(event) => {
@@ -423,18 +425,18 @@ export default function App() {
                 }
               }}
             />
-            <FieldHint>Usa un nombre corto para identificar la combinación de servicios que quieres agrupar.</FieldHint>
+            <FieldHint>{t("workspaceCreator.nameHint")}</FieldHint>
           </FieldLabelWrap>
 
           <Card tone="muted" className="p-4 text-[11px] text-textMuted">
             {selectedProject
-              ? `Se va a crear con ${selectedProject.name} precargado para que puedas arrancar más rápido.`
-              : "Se crea vacío y luego puedes agregar proyectos desde el detalle de cada servicio."}
+              ? t("workspaceCreator.withProject", { name: selectedProject.name })
+              : t("workspaceCreator.empty")}
           </Card>
 
           <div className="flex items-center justify-end gap-2">
             <Button type="button" variant="secondary" size="sm" onClick={() => setIsWorkspaceCreatorOpen(false)}>
-              Cancelar
+              {t("workspaceCreator.cancel")}
             </Button>
             <Button
               type="button"
@@ -444,7 +446,7 @@ export default function App() {
               disabled={uiBusy || !workspaceNameDraft.trim()}
             >
               <FolderPlus className="h-3.5 w-3.5" />
-              Crear workspace
+              {t("workspaceCreator.create")}
             </Button>
           </div>
         </div>
@@ -453,8 +455,8 @@ export default function App() {
       <DialogShell
         open={isQuickActionsOpen}
         onOpenChange={setIsQuickActionsOpen}
-        title="Acciones rápidas"
-        description="Perfiles rápidos detectados para la vista actual del catálogo."
+        title={t("quickActions.title")}
+        description={t("quickActions.description")}
       >
         {quickProfiles.length ? (
           <div className="grid gap-2 md:grid-cols-2">
@@ -473,11 +475,13 @@ export default function App() {
                     <div className="flex items-center justify-between gap-2">
                       <span className="inline-flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.12em]">
                         <Icon className="h-4 w-4" />
-                        {profile.label}
+                        {t(profile.labelKey as Parameters<typeof t>[0])}
                       </span>
                       <span className="ui-badge ui-badge--secondary">{profile.projectIds.length}</span>
                     </div>
-                    <p className="text-[11px] leading-5 text-accent/80">{profile.description}</p>
+                    <p className="text-[11px] leading-5 text-accent/80">
+                      {t(profile.descriptionKey as Parameters<typeof t>[0])}
+                    </p>
                   </button>
                 </Card>
               );
@@ -485,8 +489,8 @@ export default function App() {
           </div>
         ) : (
           <EmptyState
-            title="Sin perfiles rápidos"
-            description="No hay perfiles automáticos disponibles para el filtro o workspace que tienes activo."
+            title={t("quickActions.emptyTitle")}
+            description={t("quickActions.emptyDesc")}
           />
         )}
       </DialogShell>
@@ -505,7 +509,7 @@ export default function App() {
         <div className="fixed inset-0 flex items-center justify-center bg-ink/58 backdrop-blur-sm">
           <div className="surface-panel inline-flex items-center gap-2 px-4 py-3 text-[11px] text-textStrong">
             <LoaderCircle className="h-3.5 w-3.5 animate-spin" />
-            Cargando snapshot local...
+            {t("app.loadingSnapshot")}
           </div>
         </div>
       ) : null}

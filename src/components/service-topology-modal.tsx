@@ -44,6 +44,7 @@ import type {
   ServiceGraphSnapshot,
   ServiceTrafficEvent,
 } from "../lib/types";
+import { useTranslation } from "../i18n";
 import { Badge } from "./ui/badge";
 import { Button } from "./ui/button";
 import { Card } from "./ui/card";
@@ -91,6 +92,8 @@ type ServiceNodeData = {
   focused: boolean;
   liveStatus: "ok" | "error" | null;
   lastActivityLabel: string | null;
+  noPortLabel: string;
+  clickToConfigureLabel: string;
 };
 
 type ServiceNode = Node<ServiceNodeData, "service">;
@@ -280,6 +283,7 @@ function resolveTrafficEvent(
   event: ServiceTrafficEvent,
   connections: ServiceGraphConnection[],
   projectsById: Map<string, ServiceGraphProject>,
+  externalLabel: string,
 ): ResolvedTrafficEvent {
   const targetConnections = connections.filter((connection) => connection.targetProjectId === event.targetProjectId);
   const normalizedSourceLabel = normalizeMatchText(event.sourceLabel);
@@ -325,7 +329,7 @@ function resolveTrafficEvent(
     ...event,
     resolvedSourceProjectId,
     resolvedSourceLabel:
-      (resolvedSourceProjectId ? projectsById.get(resolvedSourceProjectId)?.projectName : null) ?? event.sourceLabel ?? "externo",
+      (resolvedSourceProjectId ? projectsById.get(resolvedSourceProjectId)?.projectName : null) ?? event.sourceLabel ?? externalLabel,
     resolvedTargetLabel: projectsById.get(event.targetProjectId)?.projectName ?? event.targetProjectId,
     matchedConnectionIds: matchedConnections.map((connection) => connection.id),
   };
@@ -354,14 +358,14 @@ function buildTargetEnvOptions(targetProject: ServiceGraphProject | null) {
   return [...new Set([DEFAULT_TARGET_ENV_KEY, ...keys])];
 }
 
-function describeLinkPreview(draft: LinkDraft, targetProject: ServiceGraphProject | null, targetEnvKey: string) {
+function describeLinkPreview(draft: LinkDraft, targetProject: ServiceGraphProject | null, targetEnvKey: string, noPortMessage: string) {
   const targetEnv = targetProject?.envVariables.find((env) => env.key === targetEnvKey) ?? null;
   const rawPort = targetEnv?.value ?? String(targetProject?.runtimePort ?? targetProject?.configuredPort ?? "");
   const portText = rawPort.trim().replace(/[^\d].*$/, "");
   const port = portText || String(targetProject?.runtimePort ?? targetProject?.configuredPort ?? "");
 
   if (!port) {
-    return "El destino todavía no expone un puerto resoluble.";
+    return noPortMessage;
   }
 
   return `${normalizeProtocol(draft.protocol)}://${normalizeHost(draft.host)}:${port}${normalizeLinkPath(draft.path)}${normalizeLinkQuery(draft.query)}`;
@@ -409,11 +413,11 @@ function ServiceTopologyNode({ data }: NodeProps<ServiceNode>) {
   const portLabel =
     runtimePort && configuredPort && runtimePort !== configuredPort
       ? `${runtimePort} · cfg ${configuredPort}`
-      : runtimePort ?? configuredPort ?? "sin puerto";
+      : runtimePort ?? configuredPort ?? data.noPortLabel;
 
   return (
     <div
-      title={data.lastActivityLabel ?? "Click para configurar variables y enlaces"}
+      title={data.lastActivityLabel ?? data.clickToConfigureLabel}
       className={[
         "service-topology-node",
         data.focused ? "service-topology-node--focused" : "",
@@ -453,6 +457,7 @@ const nodeTypes = {
 };
 
 function ServiceTopologySurface({ active, onOpenChange, focusProjectId, shell }: ServiceTopologySurfaceProps) {
+  const { t } = useTranslation();
   const [graphSnapshot, setGraphSnapshot] = useState<ServiceGraphSnapshot | null>(null);
   const [projects, setProjects] = useState<Project[]>([]);
   const [trafficEvents, setTrafficEvents] = useState<ServiceTrafficEvent[]>([]);
@@ -508,7 +513,7 @@ function ServiceTopologySurface({ active, onOpenChange, focusProjectId, shell }:
       })
       .catch((errorValue) => {
         if (!cancelled) {
-          setError(errorValue instanceof Error ? errorValue.message : "No fue posible cargar el mapa visual.");
+          setError(errorValue instanceof Error ? errorValue.message : t("topology.errorLoad"));
         }
       })
       .finally(() => {
@@ -693,6 +698,8 @@ function ServiceTopologySurface({ active, onOpenChange, focusProjectId, shell }:
     return new Map(projects.map((project) => [project.id, project]));
   }, [projects]);
 
+  const externalLabel = t("topology.externalLabel");
+
   const liveTraffic = useMemo(() => {
     const cutoff = Date.now() - LIVE_WINDOW_MS;
     return trafficEvents.filter((event) => trafficTimestampValue(event.timestamp) >= cutoff);
@@ -703,14 +710,14 @@ function ServiceTopologySurface({ active, onOpenChange, focusProjectId, shell }:
       return liveTraffic.map((event) => ({
         ...event,
         resolvedSourceProjectId: event.sourceProjectId,
-        resolvedSourceLabel: event.sourceLabel ?? "externo",
+        resolvedSourceLabel: event.sourceLabel ?? externalLabel,
         resolvedTargetLabel: event.targetProjectId,
         matchedConnectionIds: [],
       }));
     }
 
-    return liveTraffic.map((event) => resolveTrafficEvent(event, graphSnapshot.connections, graphProjectsById));
-  }, [graphProjectsById, graphSnapshot, liveTraffic]);
+    return liveTraffic.map((event) => resolveTrafficEvent(event, graphSnapshot.connections, graphProjectsById, externalLabel));
+  }, [graphProjectsById, graphSnapshot, liveTraffic, externalLabel]);
 
   const trafficByProject = useMemo(() => {
     const entries = new Map<string, { liveStatus: "ok" | "error" | null; lastActivityLabel: string | null }>();
@@ -755,6 +762,9 @@ function ServiceTopologySurface({ active, onOpenChange, focusProjectId, shell }:
     return matches;
   }, [resolvedLiveTraffic]);
 
+  const noPortLabel = t("topology.noPort");
+  const clickToConfigureLabel = t("topology.clickToConfigure");
+
   const nodes = useMemo<ServiceNode[]>(() => {
     if (!graphSnapshot) {
       return [];
@@ -775,11 +785,13 @@ function ServiceTopologySurface({ active, onOpenChange, focusProjectId, shell }:
           focused: selectedProjectId === project.projectId,
           liveStatus: traffic.liveStatus,
           lastActivityLabel: traffic.lastActivityLabel,
+          noPortLabel,
+          clickToConfigureLabel,
         },
         style: { width: NODE_WIDTH },
       };
     });
-  }, [graphSnapshot, nodePositions, selectedProjectId, trafficByProject]);
+  }, [graphSnapshot, nodePositions, selectedProjectId, trafficByProject, noPortLabel, clickToConfigureLabel]);
 
   const edges = useMemo<Edge[]>(() => {
     if (!graphSnapshot) {
@@ -837,8 +849,8 @@ function ServiceTopologySurface({ active, onOpenChange, focusProjectId, shell }:
           opacity: recentMatch ? 1 : 0.92,
           strokeDasharray: connection.linkSource === "inferred" ? "7 5" : undefined,
         },
-        };
-      });
+      };
+    });
   }, [graphSnapshot, recentMatchByConnectionId, selectedConnectionId]);
 
   const selectedConnection = useMemo(() => {
@@ -892,7 +904,7 @@ function ServiceTopologySurface({ active, onOpenChange, focusProjectId, shell }:
         preserveProjectId: selectedProjectId,
       });
     } catch (errorValue) {
-      setError(errorValue instanceof Error ? errorValue.message : "No fue posible refrescar el mapa.");
+      setError(errorValue instanceof Error ? errorValue.message : t("topology.errorRefresh"));
     } finally {
       setIsLoading(false);
     }
@@ -914,7 +926,7 @@ function ServiceTopologySurface({ active, onOpenChange, focusProjectId, shell }:
         preserveProjectId: projectId,
       });
     } catch (errorValue) {
-      setError(errorValue instanceof Error ? errorValue.message : "No fue posible guardar el override del .env.");
+      setError(errorValue instanceof Error ? errorValue.message : t("topology.errorSaveEnv"));
       throw errorValue;
     } finally {
       setIsSaving(false);
@@ -923,7 +935,7 @@ function ServiceTopologySurface({ active, onOpenChange, focusProjectId, shell }:
 
   async function persistLink(nextDraft: LinkDraft) {
     if (!nextDraft.sourceProjectId || !nextDraft.sourceEnvKey || !nextDraft.targetProjectId) {
-      setError("Selecciona variable origen y microservicio destino antes de guardar.");
+      setError(t("topology.errorSelectSource"));
       return;
     }
 
@@ -955,7 +967,7 @@ function ServiceTopologySurface({ active, onOpenChange, focusProjectId, shell }:
       setSelectedProjectId(nextDraft.sourceProjectId);
       setDraftLink(null);
     } catch (errorValue) {
-      setError(errorValue instanceof Error ? errorValue.message : "No fue posible guardar el enlace.");
+      setError(errorValue instanceof Error ? errorValue.message : t("topology.errorSaveLink"));
     } finally {
       setIsSaving(false);
     }
@@ -997,7 +1009,7 @@ function ServiceTopologySurface({ active, onOpenChange, focusProjectId, shell }:
       setDraftLink(null);
       setSelectedProjectId(selectedConnection.sourceProjectId);
     } catch (errorValue) {
-      setError(errorValue instanceof Error ? errorValue.message : "No fue posible eliminar el enlace.");
+      setError(errorValue instanceof Error ? errorValue.message : t("topology.errorDeleteLink"));
     } finally {
       setIsSaving(false);
     }
@@ -1046,19 +1058,19 @@ function ServiceTopologySurface({ active, onOpenChange, focusProjectId, shell }:
     <DialogShell
       open={active}
       onOpenChange={onOpenChange ?? (() => undefined)}
-      title="Mapa visual de .env y tráfico entre microservicios"
-      description="Nodos compactos para ver estado y puertos, con edición lateral amigable para variables y redirecciones."
+      title={t("topology.title")}
+      description={t("topology.description")}
       contentClassName="ui-dialog-content--topology"
       bodyClassName="ui-dialog-body--topology"
       actions={
         <>
           <Button type="button" variant="secondary" size="sm" onClick={() => setTrafficEvents([])} disabled={!trafficEvents.length}>
             <Activity className="h-3.5 w-3.5" />
-            Limpiar actividad
+            {t("topology.clearActivity")}
           </Button>
           <Button type="button" variant="secondary" size="sm" onClick={() => void refreshSnapshot()} disabled={isLoading}>
             <RefreshCw className={["h-3.5 w-3.5", isLoading ? "animate-spin" : ""].join(" ")} />
-            Refrescar
+            {t("topology.refresh")}
           </Button>
         </>
       }
@@ -1102,8 +1114,8 @@ function ServiceTopologySurface({ active, onOpenChange, focusProjectId, shell }:
           ) : (
             <div className="service-topology__emptyCanvas">
               <EmptyState
-                title={isLoading ? "Cargando grafo" : "Sin datos del grafo"}
-                description={isLoading ? "Leyendo proyectos, puertos, variables y enlaces." : error ?? "No hay datos suficientes para pintar el flujo."}
+                title={isLoading ? t("topology.loadingGraph") : t("topology.noGraphData")}
+                description={isLoading ? t("topology.loadingGraphDesc") : error ?? t("topology.noGraphDataDesc")}
               />
             </div>
           )}
@@ -1113,8 +1125,8 @@ function ServiceTopologySurface({ active, onOpenChange, focusProjectId, shell }:
           <Card tone="accent" className="p-3.5">
             <div className="service-topology__sectionHeader">
               <div>
-                <p className="text-[10px] uppercase tracking-[0.16em] text-textSoft">Actividad reciente</p>
-                <h3 className="mt-0.5 text-[12px] font-semibold text-textStrong">Pulso en tiempo real</h3>
+                <p className="text-[10px] uppercase tracking-[0.16em] text-textSoft">{t("topology.activitySection")}</p>
+                <h3 className="mt-0.5 text-[12px] font-semibold text-textStrong">{t("topology.activityTitle")}</h3>
               </div>
               <Badge
                 variant={resolvedLiveTraffic.some((entry) => !entry.ok) ? "danger" : resolvedLiveTraffic.length ? "success" : "secondary"}
@@ -1147,7 +1159,7 @@ function ServiceTopologySurface({ active, onOpenChange, focusProjectId, shell }:
                 </div>
               ))}
               {!resolvedLiveTraffic.length ? (
-                <p className="text-[11px] text-textMuted">Todavía no hay tráfico reciente para animar el flujo.</p>
+                <p className="text-[11px] text-textMuted">{t("topology.noTraffic")}</p>
               ) : null}
             </div>
           </Card>
@@ -1155,36 +1167,42 @@ function ServiceTopologySurface({ active, onOpenChange, focusProjectId, shell }:
           <Card tone={activeDraft?.sourceKind === "inferred" ? "warning" : "muted"} className="p-4">
             <div className="service-topology__sectionHeader">
               <div>
-                <p className="text-[10px] uppercase tracking-[0.16em] text-textSoft">Enlace seleccionado</p>
+                <p className="text-[10px] uppercase tracking-[0.16em] text-textSoft">{t("topology.linkSection")}</p>
                 <h3 className="mt-1 text-[13px] font-semibold text-textStrong">
-                  {activeDraft ? "Redirección y valor actual del .env" : "Crea o selecciona un enlace"}
+                  {activeDraft ? t("topology.linkTitle") : t("topology.linkEmpty")}
                 </h3>
               </div>
-              {activeDraft ? <Badge variant="info">{activeDraft.sourceKind === "new" ? "Nuevo" : activeDraft.sourceKind}</Badge> : null}
+              {activeDraft ? (
+                <Badge variant="info">
+                  {activeDraft.sourceKind === "new" ? t("topology.linkNew") : activeDraft.sourceKind}
+                </Badge>
+              ) : null}
             </div>
 
             {activeDraft ? (
               <div className="mt-3 grid gap-3">
                 <div className="service-topology__linkSummary">
                   <div className="service-topology__summaryRow">
-                    <span className="service-topology__summaryLabel">Origen</span>
+                    <span className="service-topology__summaryLabel">{t("topology.linkSummaryOrigin")}</span>
                     <span className="service-topology__summaryValue">{activeSourceGraphProject?.projectName ?? activeDraft.sourceProjectId}</span>
                   </div>
                   <div className="service-topology__summaryRow">
-                    <span className="service-topology__summaryLabel">Archivo .env</span>
-                    <span className="service-topology__summaryValue">{projectsById.get(activeDraft.sourceProjectId)?.selectedEnvFile ?? "Solo override"}</span>
+                    <span className="service-topology__summaryLabel">{t("topology.linkSummaryEnvFile")}</span>
+                    <span className="service-topology__summaryValue">
+                      {projectsById.get(activeDraft.sourceProjectId)?.selectedEnvFile ?? t("topology.linkOnlyOverride")}
+                    </span>
                   </div>
                   <div className="service-topology__summaryRow">
-                    <span className="service-topology__summaryLabel">Preview</span>
+                    <span className="service-topology__summaryLabel">{t("topology.linkSummaryPreview")}</span>
                     <span className="service-topology__summaryValue">
-                      {describeLinkPreview(activeDraft, activeTargetGraphProject, activeDraft.targetEnvKey)}
+                      {describeLinkPreview(activeDraft, activeTargetGraphProject, activeDraft.targetEnvKey, t("topology.noPortResolvable"))}
                     </span>
                   </div>
                 </div>
 
                 <div className="service-topology__panelGrid">
                   <FieldLabelWrap>
-                    <FieldLabel>Variable origen</FieldLabel>
+                    <FieldLabel>{t("topology.linkSourceVarLabel")}</FieldLabel>
                     <Select
                       value={activeDraft.sourceEnvKey}
                       onChange={(event) => {
@@ -1207,11 +1225,11 @@ function ServiceTopologySurface({ active, onOpenChange, focusProjectId, shell }:
                         </option>
                       ))}
                     </Select>
-                    <FieldHint>Escoge la variable `.env` que quieres redirigir hacia otro microservicio.</FieldHint>
+                    <FieldHint>{t("topology.linkSourceVarHint")}</FieldHint>
                   </FieldLabelWrap>
 
                   <FieldLabelWrap className="service-topology__panelGridWide">
-                    <FieldLabel>Valor actual del .env</FieldLabel>
+                    <FieldLabel>{t("topology.linkCurrentValue")}</FieldLabel>
                     <Input
                       value={linkEnvDraftValue}
                       onChange={(event) =>
@@ -1222,11 +1240,11 @@ function ServiceTopologySurface({ active, onOpenChange, focusProjectId, shell }:
                       }
                       placeholder="http://localhost:3000/api"
                     />
-                    <FieldHint>Se guardará como override activo para el microservicio origen al guardar la redirección.</FieldHint>
+                    <FieldHint>{t("topology.linkCurrentValueHint")}</FieldHint>
                   </FieldLabelWrap>
 
                   <FieldLabelWrap>
-                    <FieldLabel>Redirigir hacia</FieldLabel>
+                    <FieldLabel>{t("topology.linkRedirectTo")}</FieldLabel>
                     <Select
                       value={activeDraft.targetProjectId}
                       onChange={(event) => {
@@ -1242,14 +1260,14 @@ function ServiceTopologySurface({ active, onOpenChange, focusProjectId, shell }:
                     >
                       {targetOptions.map((project) => (
                         <option key={project.projectId} value={project.projectId}>
-                          {project.projectName} · {project.runtimePort ?? project.configuredPort ?? "sin puerto"} · {project.status}
+                          {project.projectName} · {project.runtimePort ?? project.configuredPort ?? t("topology.noPort")} · {project.status}
                         </option>
                       ))}
                     </Select>
                   </FieldLabelWrap>
 
                   <FieldLabelWrap>
-                    <FieldLabel>Puerto destino</FieldLabel>
+                    <FieldLabel>{t("topology.linkTargetPort")}</FieldLabel>
                     <Select value={activeDraft.targetEnvKey} onChange={(event) => setDraftLink({ ...activeDraft, targetEnvKey: event.target.value })}>
                       {targetEnvOptions.map((envKey) => (
                         <option key={envKey} value={envKey}>
@@ -1260,7 +1278,7 @@ function ServiceTopologySurface({ active, onOpenChange, focusProjectId, shell }:
                   </FieldLabelWrap>
 
                   <FieldLabelWrap>
-                    <FieldLabel>Protocolo</FieldLabel>
+                    <FieldLabel>{t("topology.linkProtocol")}</FieldLabel>
                     <Select value={activeDraft.protocol} onChange={(event) => setDraftLink({ ...activeDraft, protocol: event.target.value })}>
                       <option value="http">http</option>
                       <option value="https">https</option>
@@ -1268,47 +1286,47 @@ function ServiceTopologySurface({ active, onOpenChange, focusProjectId, shell }:
                   </FieldLabelWrap>
 
                   <FieldLabelWrap>
-                    <FieldLabel>Host</FieldLabel>
+                    <FieldLabel>{t("topology.linkHost")}</FieldLabel>
                     <Input value={activeDraft.host} onChange={(event) => setDraftLink({ ...activeDraft, host: event.target.value })} />
                   </FieldLabelWrap>
 
                   <FieldLabelWrap className="service-topology__panelGridWide">
-                    <FieldLabel>Path</FieldLabel>
+                    <FieldLabel>{t("topology.linkPath")}</FieldLabel>
                     <Input value={activeDraft.path} onChange={(event) => setDraftLink({ ...activeDraft, path: event.target.value })} placeholder="/api/v1" />
                   </FieldLabelWrap>
 
                   <FieldLabelWrap className="service-topology__panelGridWide">
-                    <FieldLabel>Query</FieldLabel>
+                    <FieldLabel>{t("topology.linkQuery")}</FieldLabel>
                     <Input value={activeDraft.query} onChange={(event) => setDraftLink({ ...activeDraft, query: event.target.value })} placeholder="?channel=local" />
                   </FieldLabelWrap>
                 </div>
 
                 {activeDraft.sourceKind === "inferred" ? (
-                  <p className="text-[11px] text-warn">Este enlace fue detectado automáticamente. Al guardar, quedará persistido como conexión manual.</p>
+                  <p className="text-[11px] text-warn">{t("topology.linkInferred")}</p>
                 ) : null}
 
                 {recentFailuresForActiveLink ? (
-                  <p className="text-[11px] text-danger">Este enlace tuvo fallos recientes. La actividad reciente te muestra el error más nuevo.</p>
+                  <p className="text-[11px] text-danger">{t("topology.linkRecentFailures")}</p>
                 ) : null}
 
                 <div className="flex flex-wrap justify-end gap-2">
                   {selectedConnection?.linkSource === "manual" ? (
                     <Button type="button" variant="destructive" size="sm" onClick={() => void handleDeleteLink()} disabled={isSaving}>
                       <Trash2 className="h-3.5 w-3.5" />
-                      Eliminar enlace
+                      {t("topology.linkDeleteBtn")}
                     </Button>
                   ) : null}
                   <Button type="button" variant="default" size="sm" onClick={() => void handleSaveLinkWithEnv()} disabled={isSaving}>
                     <Save className="h-3.5 w-3.5" />
-                    Guardar redirección
+                    {t("topology.linkSaveBtn")}
                   </Button>
                 </div>
               </div>
             ) : (
               <div className="mt-3">
                 <EmptyState
-                  title="Selecciona un edge o arrastra entre nodos"
-                  description="Conecta un microservicio con otro y termina la configuración desde este panel con selects más claros."
+                  title={t("topology.linkSelectEdge")}
+                  description={t("topology.linkSelectEdgeDesc")}
                 />
               </div>
             )}
@@ -1317,9 +1335,9 @@ function ServiceTopologySurface({ active, onOpenChange, focusProjectId, shell }:
           <Card tone="muted" className="p-4">
             <div className="service-topology__sectionHeader">
               <div>
-                <p className="text-[10px] uppercase tracking-[0.16em] text-textSoft">Servicio seleccionado</p>
+                <p className="text-[10px] uppercase tracking-[0.16em] text-textSoft">{t("topology.serviceSection")}</p>
                 <h3 className="mt-1 text-[13px] font-semibold text-textStrong">
-                  {selectedProjectGraph ? selectedProjectGraph.projectName : "Selecciona un nodo"}
+                  {selectedProjectGraph ? selectedProjectGraph.projectName : t("topology.serviceSelectNode")}
                 </h3>
               </div>
               {selectedProjectGraph ? <Badge variant="secondary">{selectedProjectGraph.status}</Badge> : null}
@@ -1330,11 +1348,11 @@ function ServiceTopologySurface({ active, onOpenChange, focusProjectId, shell }:
                 <div className="service-topology__serviceMeta">
                   <span>
                     <Cable className="h-3.5 w-3.5" />
-                    puerto {selectedProjectGraph.runtimePort ?? selectedProjectGraph.configuredPort ?? "n/a"}
+                    {t("topology.servicePort", { port: String(selectedProjectGraph.runtimePort ?? selectedProjectGraph.configuredPort ?? "n/a") })}
                   </span>
                   <span>
                     <ArrowRightLeft className="h-3.5 w-3.5" />
-                    {selectedProjectFull.selectedEnvFile ?? "solo overrides"}
+                    {selectedProjectFull.selectedEnvFile ?? t("topology.serviceOnlyOverrides")}
                   </span>
                 </div>
 
@@ -1348,7 +1366,9 @@ function ServiceTopologySurface({ active, onOpenChange, focusProjectId, shell }:
                             <div>
                               <p className="service-topology__envEditorKey">{env.key}</p>
                               <p className="service-topology__envEditorMeta">
-                                {env.source} {env.enabled ? "" : "· deshabilitada"} {env.isUrlLike ? "· url" : ""}
+                                {env.source}
+                                {!env.enabled ? ` ${t("topology.serviceEnvDisabled")}` : ""}
+                                {env.isUrlLike ? ` ${t("topology.serviceEnvUrl")}` : ""}
                               </p>
                             </div>
                             <Button
@@ -1370,7 +1390,7 @@ function ServiceTopologySurface({ active, onOpenChange, focusProjectId, shell }:
                               }}
                             >
                               <Network className="h-3.5 w-3.5" />
-                              Usar en enlace
+                              {t("topology.serviceUseInLink")}
                             </Button>
                           </div>
 
@@ -1383,7 +1403,7 @@ function ServiceTopologySurface({ active, onOpenChange, focusProjectId, shell }:
                                   [envDraftKey(selectedProjectGraph.projectId, env.key)]: event.target.value,
                                 }))
                               }
-                              placeholder="Valor override"
+                              placeholder={t("topology.serviceEnvPlaceholder")}
                             />
                             <Button
                               type="button"
@@ -1392,7 +1412,7 @@ function ServiceTopologySurface({ active, onOpenChange, focusProjectId, shell }:
                               onClick={() => void persistEnvValue(selectedProjectGraph.projectId, env.key, draftValue, env)}
                               disabled={isSaving}
                             >
-                              Guardar
+                              {t("topology.serviceSave")}
                             </Button>
                           </div>
                         </div>
@@ -1400,8 +1420,8 @@ function ServiceTopologySurface({ active, onOpenChange, focusProjectId, shell }:
                     })
                   ) : (
                     <EmptyState
-                      title="Sin variables detectadas"
-                      description="Este microservicio no expone variables `.env` detectables todavía."
+                      title={t("topology.serviceNoVars")}
+                      description={t("topology.serviceNoVarsDesc")}
                     />
                   )}
                 </div>
@@ -1409,8 +1429,8 @@ function ServiceTopologySurface({ active, onOpenChange, focusProjectId, shell }:
             ) : (
               <div className="mt-3">
                 <EmptyState
-                  title="Haz click en un nodo"
-                  description="Desde aquí puedes ajustar valores `.env` del microservicio sin sobrecargar el nodo visual."
+                  title={t("topology.serviceClickNode")}
+                  description={t("topology.serviceClickNodeDesc")}
                 />
               </div>
             )}

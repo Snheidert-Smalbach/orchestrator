@@ -1,5 +1,6 @@
 import { BellRing } from "lucide-react";
 import type { AlertEntry } from "../lib/app-shell";
+import { useTranslation } from "../i18n";
 import { Card } from "./ui/card";
 import { DialogShell } from "./ui/dialog-shell";
 import { EmptyState } from "./ui/empty-state";
@@ -22,13 +23,14 @@ function toneClassName(tone: AlertEntry["tone"]) {
 }
 
 export function AlertsDrawer({ open, onOpenChange, entries }: Props) {
+  const { t } = useTranslation();
   return (
     <DialogShell
       open={open}
       onOpenChange={onOpenChange}
       variant="drawer"
-      title="Avisos y errores"
-      description="Warnings y errores activos para que el área principal quede enfocada en operación."
+      title={t("alerts.drawerTitle")}
+      description={t("alerts.drawerDesc")}
       bodyClassName="min-h-0 flex-1 overflow-auto"
     >
       {entries.length ? (
@@ -45,8 +47,8 @@ export function AlertsDrawer({ open, onOpenChange, entries }: Props) {
       ) : (
         <EmptyState
           icon={<BellRing className="h-4 w-4" />}
-          title="Sin avisos activos"
-          description="Cuando aparezcan conflictos de puertos, errores o procesos pendientes los vas a ver aquí."
+          title={t("alerts.emptyTitle")}
+          description={t("alerts.emptyDesc")}
         />
       )}
     </DialogShell>
