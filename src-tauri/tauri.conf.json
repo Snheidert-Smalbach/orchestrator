@@ -16,7 +16,8 @@
                                     "width":  1600,
                                     "height":  960,
                                     "resizable":  true,
-                                    "fullscreen":  false
+                                    "fullscreen":  false,
+                                    "additionalBrowserArgs":  "--disable-gpu"
                                 }
                             ],
                 "security":  {

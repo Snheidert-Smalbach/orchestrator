@@ -171,7 +171,7 @@ function resolveStopTargetIds(projects: Project[], projectIds?: string[]) {
   }
 
   return projects
-    .filter((project) => isForceStopCandidateStatus(project.status))
+    .filter((project) => isStopCandidateStatus(project.status))
     .map((project) => project.id);
 }
 

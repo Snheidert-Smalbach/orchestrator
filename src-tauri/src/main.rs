@@ -69,6 +69,7 @@ fn main() {
             commands::get_project_mocks,
             commands::save_project_mock,
             commands::delete_project_mock,
+            commands::delete_all_project_mocks,
             commands::start_projects,
             commands::stop_projects,
             commands::force_stop_projects,

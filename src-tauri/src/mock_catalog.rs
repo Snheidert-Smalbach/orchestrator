@@ -80,15 +80,10 @@ pub fn save_project_mock(
 ) -> Result<ProjectMockCollection> {
     let mut lines = load_registry_lines(db_path, project_id)?;
     let persisted = project_mock_to_line(mock);
-
-    if let Some(index) = lines
-        .iter()
-        .position(|entry| stable_line_id(entry) == persisted.id)
-    {
-        lines[index] = persisted;
-    } else {
-        lines.push(persisted);
-    }
+    lines.retain(|entry| {
+        stable_line_id(entry) != persisted.id && !request_identity_matches(entry, &persisted)
+    });
+    lines.push(persisted);
 
     rewrite_registry(db_path, project_id, &lines)?;
     list_project_mocks(db_path, project_id)
@@ -103,6 +98,42 @@ pub fn delete_project_mock(
     lines.retain(|entry| stable_line_id(entry) != mock_id);
     rewrite_registry(db_path, project_id, &lines)?;
     list_project_mocks(db_path, project_id)
+}
+
+pub fn delete_all_project_mocks(db_path: &Path, project_id: &str) -> Result<ProjectMockCollection> {
+    rewrite_registry(db_path, project_id, &[])?;
+    list_project_mocks(db_path, project_id)
+}
+
+fn request_identity_matches(left: &PersistedMockLine, right: &PersistedMockLine) -> bool {
+    if left.kind != right.kind {
+        return false;
+    }
+
+    if !left
+        .request
+        .method
+        .eq_ignore_ascii_case(&right.request.method)
+        || left.request.path != right.request.path
+    {
+        return false;
+    }
+
+    match MockKind::from_db(&left.kind) {
+        MockKind::Graphql => left.request.normalized_body == right.request.normalized_body,
+        MockKind::Rest => {
+            left.request.normalized_query == right.request.normalized_query
+                && left.request.normalized_body == right.request.normalized_body
+        }
+        MockKind::HttpOther => {
+            left.request.normalized_query == right.request.normalized_query
+                && left.request.body_hex == right.request.body_hex
+        }
+        MockKind::Unknown => {
+            left.request.normalized_query == right.request.normalized_query
+                && left.request.normalized_body == right.request.normalized_body
+        }
+    }
 }
 
 fn build_summary(mocks: &[ProjectMock]) -> ProjectMockSummary {
@@ -573,4 +604,86 @@ fn hex_decode(value: &str) -> Result<Vec<u8>> {
         index += 2;
     }
     Ok(bytes)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::{fs, path::Path};
+
+    fn temp_db_path() -> PathBuf {
+        let unique = format!(
+            "orchestrator-mock-catalog-{}-{}",
+            std::process::id(),
+            uuid::Uuid::new_v4()
+        );
+        let root = std::env::temp_dir().join(unique);
+        fs::create_dir_all(&root).expect("temp dir");
+        root.join("orchestrator.sqlite")
+    }
+
+    fn cleanup_temp_root(db_path: &Path) {
+        if let Some(root) = db_path.parent() {
+            let _ = fs::remove_dir_all(root);
+        }
+    }
+
+    fn sample_mock(id: &str, response_body: &str) -> ProjectMock {
+        ProjectMock {
+            id: id.to_string(),
+            name: "GET /api/customers".to_string(),
+            source: MockSource::Captured,
+            kind: MockKind::Rest,
+            recorded_at: timestamp_now(),
+            notes: None,
+            request_method: "GET".to_string(),
+            request_path: "/api/customers".to_string(),
+            request_query: "page=1&size=20".to_string(),
+            request_headers: vec![MockHeader {
+                name: "Authorization".to_string(),
+                value: "Bearer token-1".to_string(),
+            }],
+            request_content_type: Some("application/json".to_string()),
+            request_body: String::new(),
+            response_status_code: 200,
+            response_reason_phrase: "OK".to_string(),
+            response_headers: vec![MockHeader {
+                name: "Content-Type".to_string(),
+                value: "application/json".to_string(),
+            }],
+            response_content_type: Some("application/json".to_string()),
+            response_body: response_body.to_string(),
+        }
+    }
+
+    #[test]
+    fn save_project_mock_replaces_existing_entry_with_same_request_identity() {
+        let db_path = temp_db_path();
+        let first = sample_mock("mock-1", r#"{"items":[1]}"#);
+        let mut second = sample_mock("mock-2", r#"{"items":[2]}"#);
+        second.request_headers = vec![MockHeader {
+            name: "Authorization".to_string(),
+            value: "Bearer token-2".to_string(),
+        }];
+
+        let first_collection =
+            save_project_mock(&db_path, "project-1", first).expect("save first mock");
+        assert_eq!(first_collection.mocks.len(), 1);
+
+        let second_collection =
+            save_project_mock(&db_path, "project-1", second.clone()).expect("save second mock");
+
+        assert_eq!(second_collection.mocks.len(), 1);
+        assert_eq!(second_collection.mocks[0].id, second.id);
+        assert_eq!(
+            second_collection.mocks[0].response_body,
+            second.response_body
+        );
+        assert_eq!(
+            second_collection.mocks[0].request_headers[0].value,
+            "Bearer token-2"
+        );
+
+        cleanup_temp_root(&db_path);
+    }
 }

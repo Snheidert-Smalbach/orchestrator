@@ -1,6 +1,6 @@
 import { Plus, RefreshCw, Save, Trash2 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
-import { deleteProjectMock, getProjectMocks, saveProjectMock } from "../lib/tauri";
+import { deleteAllProjectMocks, deleteProjectMock, getProjectMocks, saveProjectMock } from "../lib/tauri";
 import type { MockHeader, MockKind, Project, ProjectMock, ProjectMockCollection } from "../lib/types";
 import { useAppStore } from "../store/useAppStore";
 import { Badge } from "./ui/badge";
@@ -216,6 +216,7 @@ export function ProjectMocksEditor({ project }: { project: Project }) {
   const [isLoading, setIsLoading] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
+  const [isClearingAll, setIsClearingAll] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const editorViewportRef = useRef<HTMLDivElement | null>(null);
   const listItemRefs = useRef<Record<string, HTMLButtonElement | null>>({});
@@ -326,6 +327,27 @@ export function ProjectMocksEditor({ project }: { project: Project }) {
     }
   }
 
+  async function handleDeleteAll() {
+    if (!collection.mocks.length) {
+      return;
+    }
+
+    setIsClearingAll(true);
+    setError(null);
+
+    try {
+      const nextCollection = await deleteAllProjectMocks(project.id);
+      setCollection(nextCollection);
+      patchProjectMockSummary(project.id, nextCollection.summary);
+      setSelectedMockId(null);
+      setEditor(null);
+    } catch (deleteError) {
+      setError(deleteError instanceof Error ? deleteError.message : "No fue posible eliminar todos los mocks.");
+    } finally {
+      setIsClearingAll(false);
+    }
+  }
+
   const selectedDescriptor = editor
     ? `${editor.mock.requestMethod} ${editor.mock.requestPath}${editor.mock.requestQuery ? `?${editor.mock.requestQuery}` : ""}`
     : null;
@@ -344,6 +366,16 @@ export function ProjectMocksEditor({ project }: { project: Project }) {
           <Button type="button" variant="secondary" size="sm" onClick={() => void refreshMocks(selectedMockId)} disabled={isLoading}>
             <RefreshCw className={["h-3 w-3", isLoading ? "animate-spin" : ""].join(" ")} />
             Refrescar
+          </Button>
+          <Button
+            type="button"
+            variant="destructive"
+            size="sm"
+            onClick={() => void handleDeleteAll()}
+            disabled={isClearingAll || !collection.summary.totalCount}
+          >
+            <Trash2 className="h-3 w-3" />
+            {isClearingAll ? "Eliminando..." : "Eliminar todos"}
           </Button>
           <Button type="button" variant="default" size="sm" onClick={() => handleCreate("rest")}>
             <Plus className="h-3 w-3" />

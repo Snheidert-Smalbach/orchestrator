@@ -3,7 +3,11 @@ use std::{
     fs,
     net::TcpListener,
     process::Stdio,
-    time::{Duration, SystemTime, UNIX_EPOCH},
+    sync::{
+        atomic::{AtomicU64, Ordering},
+        Arc,
+    },
+    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
 use anyhow::{anyhow, Result};
@@ -33,6 +37,10 @@ pub struct RunningProcess {
     pub internal_port: Option<u16>,
     pub public_port: Option<u16>,
     pub command_preview: Option<String>,
+    /// Milliseconds since epoch of the last stdout/stderr line received.
+    /// Used by the readiness check to detect processes that went completely
+    /// silent without exiting (stuck during initialisation).
+    pub last_output_ms: Arc<AtomicU64>,
 }
 
 #[derive(Debug, Default)]
@@ -343,7 +351,7 @@ fn request_managed_server_shutdown(entry: &RunningProcess) {
 
 async fn wait_for_managed_server_shutdown(entry: &RunningProcess, port: Option<u16>) -> bool {
     if let Some(handle) = &entry.managed_server {
-        if !handle.wait_stopped(Duration::from_secs(4)).await {
+        if !handle.wait_stopped(Duration::from_secs(8)).await {
             return false;
         }
     }
@@ -413,7 +421,10 @@ async fn wait_for_port_release(port: Option<u16>) -> bool {
         return true;
     };
 
-    for _ in 0..20 {
+    // 40 × 250 ms = 10 s.  The OS needs time to actually release the socket after
+    // the owning process exits; 5 s was occasionally too short on Windows when the
+    // node process had keep-alive connections still draining.
+    for _ in 0..40 {
         if port_is_available(port) {
             return true;
         }
@@ -461,6 +472,10 @@ fn command_failure_reason(output: &std::process::Output) -> String {
     }
 }
 
+/// Only called from `if cfg!(windows)` branches; the attribute silences the
+/// dead-code lint on Linux / macOS builds without removing the function (it
+/// must stay visible for the type-checker on all platforms).
+#[allow(dead_code)]
 async fn is_windows_administrator() -> Result<bool> {
     let output = Command::new("powershell.exe")
         .arg("-NoProfile")
@@ -478,6 +493,7 @@ async fn is_windows_administrator() -> Result<bool> {
         .eq_ignore_ascii_case("true"))
 }
 
+#[allow(dead_code)]
 async fn force_kill_pid_elevated_windows(
     app: &AppHandle,
     project_id: &str,
@@ -531,6 +547,7 @@ fn filter_current_process_pid(pids: Vec<u32>) -> Vec<u32> {
     pids.into_iter().filter(|pid| *pid != current_pid).collect()
 }
 
+#[allow(dead_code)]
 fn parse_windows_netstat_pids(output: &str, port: u16) -> Vec<u32> {
     let expected_suffix = format!(":{port}");
     let mut seen = HashSet::new();
@@ -602,6 +619,7 @@ fn parse_ps_command_pids(output: &str, pattern: &str) -> Vec<u32> {
     pids
 }
 
+#[allow(dead_code)]
 fn escape_powershell_single_quotes(value: &str) -> String {
     value.replace('\'', "''")
 }
@@ -876,7 +894,10 @@ async fn find_pids_by_root_path(
 }
 
 async fn wait_for_project_process_release(app: &AppHandle, project: &Project) -> bool {
-    for _ in 0..20 {
+    // 48 × 250 ms = 12 s. The retry loop in force_stop_project already does active
+    // re-kills, so by the time we reach this final check the processes should be
+    // dying — we just need enough margin for the OS to finish cleaning up.
+    for _ in 0..48 {
         let port_released = project.port.map(port_is_available).unwrap_or(true);
         let root_released = find_pids_by_root_path(app, &project.id, &project.root_path)
             .await
@@ -1111,6 +1132,61 @@ async fn force_stop_project(
         }
     }
 
+    // Retry loop: after the initial kill passes, child processes may still be alive or
+    // new child processes may have been spawned.  We do up to 6 additional passes
+    // (each 400 ms apart) using a single instant check — we do NOT call
+    // wait_for_port_release here because that already sleeps up to 5 s internally,
+    // which would make each retry iteration far too slow.
+    for retry in 0..6u8 {
+        sleep(Duration::from_millis(400)).await;
+
+        // Instant (non-blocking) checks so we don't stall the loop.
+        let port_busy = project.port.map(|p| !port_is_available(p)).unwrap_or(false);
+
+        let remaining_root_pids = if should_stop_root_processes {
+            find_pids_by_root_path(app, &project.id, &project.root_path)
+                .await
+                .unwrap_or_default()
+        } else {
+            vec![]
+        };
+
+        // If nothing is left we can exit the retry loop early.
+        if !port_busy && remaining_root_pids.is_empty() {
+            break;
+        }
+
+        if port_busy {
+            if let Ok(port_pids) = find_pids_by_port(app, &project.id, project.port.unwrap_or(0)).await {
+                for pid in port_pids {
+                    if attempted_pids.insert(pid) {
+                        emit_log(
+                            app,
+                            &project.id,
+                            "system",
+                            format!("Retry {}: killing port PID {pid}", retry + 1),
+                        );
+                        let _ = force_kill_pid(app, &project.id, pid).await;
+                        killed_anything = true;
+                    }
+                }
+            }
+        }
+
+        for pid in remaining_root_pids {
+            if attempted_pids.insert(pid) {
+                emit_log(
+                    app,
+                    &project.id,
+                    "system",
+                    format!("Retry {}: killing root-path PID {pid}", retry + 1),
+                );
+                let _ = force_kill_pid(app, &project.id, pid).await;
+                killed_anything = true;
+            }
+        }
+    }
+
     if !wait_for_port_release(project.port).await {
         return Err(anyhow!(
             "Port {} is still busy after force stop for {}",
@@ -1197,12 +1273,24 @@ fn mark_start_failure(
     Ok(())
 }
 
-async fn spawn_stream_reader<R>(app: AppHandle, project_id: String, stream: &'static str, reader: R)
-where
+async fn spawn_stream_reader<R>(
+    app: AppHandle,
+    project_id: String,
+    stream: &'static str,
+    reader: R,
+    last_output_ms: Arc<AtomicU64>,
+) where
     R: tokio::io::AsyncRead + Unpin + Send + 'static,
 {
     let mut lines = BufReader::new(reader).lines();
     while let Ok(Some(line)) = lines.next_line().await {
+        last_output_ms.store(
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_millis() as u64,
+            Ordering::Relaxed,
+        );
         emit_log(&app, &project_id, stream, line);
     }
 }
@@ -1311,6 +1399,16 @@ async fn spawn_service_process(
     let pid = child
         .id()
         .ok_or_else(|| anyhow!("{} did not expose a pid", project.name))?;
+
+    // Shared timestamp updated by both stdout and stderr readers; the readiness
+    // check uses it to detect processes that stopped logging without exiting.
+    let last_output_ms = Arc::new(AtomicU64::new(
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis() as u64,
+    ));
+
     {
         let mut runtime = state.runtime.lock().await;
         runtime.stopping.remove(&project.id);
@@ -1323,6 +1421,7 @@ async fn spawn_service_process(
                 internal_port,
                 public_port: public_port.or(project.port),
                 command_preview: Some(command_plan.display.clone()),
+                last_output_ms: Arc::clone(&last_output_ms),
             },
         );
     }
@@ -1344,6 +1443,7 @@ async fn spawn_service_process(
             project.id.clone(),
             "stdout",
             stdout,
+            Arc::clone(&last_output_ms),
         ));
     }
     if let Some(stderr) = child.stderr.take() {
@@ -1352,6 +1452,7 @@ async fn spawn_service_process(
             project.id.clone(),
             "stderr",
             stderr,
+            Arc::clone(&last_output_ms),
         ));
     }
 
@@ -1480,6 +1581,12 @@ async fn spawn_mock_only_project(
                 internal_port: None,
                 public_port: Some(public_port),
                 command_preview: Some(resolve_command_preview(project)),
+                last_output_ms: Arc::new(AtomicU64::new(
+                    SystemTime::now()
+                        .duration_since(UNIX_EPOCH)
+                        .unwrap_or_default()
+                        .as_millis() as u64,
+                )),
             },
         );
     }
@@ -1584,8 +1691,14 @@ async fn wait_until_ready(app: &AppHandle, state: &AppState, project: &Project) 
                         .as_ref()
                         .and_then(|entry| entry.public_port.or(entry.internal_port)),
                 };
+                // In Record mode, project.port is the recording proxy port (already listening),
+                // so we must NOT fall back to it: connecting would always succeed immediately
+                // and produce a false-positive Ready signal before the real upstream MS starts.
                 let port = runtime_port
-                    .or(project.port)
+                    .or_else(|| match project.launch_mode {
+                        LaunchMode::Record => None,
+                        _ => project.port,
+                    })
                     .or_else(|| {
                         project
                             .readiness_value
@@ -1599,14 +1712,56 @@ async fn wait_until_ready(app: &AppHandle, state: &AppState, project: &Project) 
                         )
                     })?;
 
-                let mut attempts = 0u8;
+                // Smart readiness wait: no fixed attempt count, no silence heuristic.
+                //
+                // The only reliable signal that a process has failed is that it actually
+                // exited.  When a process exits the child.wait() task removes it from
+                // runtime.running and updates the DB status to Failed / Stopped.
+                //
+                // We must NOT use log-silence as a failure indicator because many runtimes
+                // (TypeScript watch compilation, JVM warm-up, heavy DB init) produce zero
+                // output for extended periods while the process is perfectly healthy.
+                //
+                // Failure conditions:
+                //   (a) runtime_entry returns None  → process exited → check DB status.
+                //   (b) Absolute 10-minute ceiling  → last-resort guard, almost unreachable.
+                const ABSOLUTE_CEILING: Duration = Duration::from_secs(600);
+                let deadline = Instant::now() + ABSOLUTE_CEILING;
+
                 loop {
+                    // 1. Port responded → service is up.
                     if TcpStream::connect(("127.0.0.1", port)).await.is_ok() {
                         break;
                     }
-                    attempts += 1;
-                    if attempts >= 40 {
-                        let message = format!("Port {} was not ready for {}", port, project.name);
+
+                    // 2. Check liveness: if the entry is gone the child already exited.
+                    let entry = runtime_entry(state, &project.id).await;
+                    if entry.is_none() {
+                        // Give the child.wait() handler a tick to finish writing the DB
+                        // status before we read it (the window is tiny but real).
+                        sleep(Duration::from_millis(100)).await;
+
+                        let current_status = db::list_projects(&state.db_path)?
+                            .into_iter()
+                            .find(|e| e.id == project.id)
+                            .map(|e| e.status);
+
+                        return Err(anyhow!(
+                            "{} exited before port {} became ready (status: {:?})",
+                            project.name,
+                            port,
+                            current_status
+                        ));
+                    }
+
+                    // 3. Absolute ceiling (should almost never happen).
+                    if Instant::now() >= deadline {
+                        let message = format!(
+                            "Port {} was not ready for {} after {}s",
+                            port,
+                            project.name,
+                            ABSOLUTE_CEILING.as_secs()
+                        );
                         db::update_project_status(
                             &state.db_path,
                             &project.id,
@@ -1621,8 +1776,14 @@ async fn wait_until_ready(app: &AppHandle, state: &AppState, project: &Project) 
                             Some(message.clone()),
                         );
                         emit_log(app, &project.id, "stderr", message.clone());
+                        if let Some(entry) = runtime_entry(state, &project.id).await {
+                            if let Some(pid) = entry.pid {
+                                let _ = force_kill_pid(app, &project.id, pid).await;
+                            }
+                        }
                         return Err(anyhow!(message));
                     }
+
                     sleep(Duration::from_millis(500)).await;
                 }
             }
@@ -1694,7 +1855,12 @@ async fn wait_for_project_ready_status(
         format!("Waiting for {} to report ready", project.name),
     );
 
-    for _ in 0..240 {
+    // Use a ceiling that matches the port-readiness absolute ceiling (600 s) so that
+    // slow-starting services — especially those in Record mode where the MS listens
+    // on a dynamically-assigned upstream port — are not incorrectly marked Failed
+    // before they have had a fair chance to bind.  The loop breaks early as soon as
+    // a terminal status (Ready / Failed / Stopped) is written to the DB.
+    for _ in 0..1200 {
         let current_status = db::list_projects(&state.db_path)?
             .into_iter()
             .find(|entry| entry.id == project.id)
@@ -1732,7 +1898,9 @@ fn select_projects(projects: Vec<Project>, project_ids: Option<Vec<String>>) -> 
             let allowed = ids.into_iter().collect::<HashSet<_>>();
             projects
                 .into_iter()
-                .filter(|project| allowed.contains(&project.id))
+                // Always respect the `enabled` flag regardless of whether explicit IDs
+                // were provided. A project with "Run" unchecked must never start.
+                .filter(|project| allowed.contains(&project.id) && project.enabled)
                 .collect()
         }
         _ => projects
@@ -1860,12 +2028,262 @@ pub async fn start_selected(
                     "{} no pudo completar la fase {}: {}",
                     project.name, project.startup_phase, error
                 );
+                // Kill any orphaned process and managed server (recording proxy / mock server)
+                // before marking the project failed.  Without this, the MS process and the
+                // recording proxy would keep running with their ports occupied, causing the
+                // next start attempt to fail on port validation.
+                let tracked = runtime_entry(&state, &project.id).await;
+                if let Some(ref entry) = tracked {
+                    request_managed_server_shutdown(entry);
+                }
+                let _ = force_stop_project(&app, &project, tracked.as_ref()).await;
+                clear_runtime_tracking(&state, &project.id).await;
                 mark_start_failure(&app, &state, &project, message.clone())?;
                 return Err(anyhow!(message));
             }
 
             ready_ids.insert(project.id.clone());
         }
+    }
+
+    Ok(())
+}
+
+async fn wait_for_project_tasks(
+    tasks: Vec<tokio::task::JoinHandle<Result<(), String>>>,
+    context: &str,
+) -> Result<()> {
+    let mut failures = Vec::new();
+
+    for task in tasks {
+        match task.await {
+            Ok(Ok(())) => {}
+            Ok(Err(message)) => failures.push(message),
+            Err(error) => failures.push(format!("{context} task failed: {error}")),
+        }
+    }
+
+    if failures.is_empty() {
+        Ok(())
+    } else {
+        Err(anyhow!(failures.join("\n")))
+    }
+}
+
+async fn stop_selected_project_task(
+    app: AppHandle,
+    state: AppState,
+    project_id: String,
+    project: Option<Project>,
+) -> Result<(), String> {
+    let tracked_process = runtime_entry(&state, &project_id).await;
+    let project_name = project
+        .as_ref()
+        .map(|entry| entry.name.clone())
+        .unwrap_or_else(|| project_id.clone());
+
+    if let Some(running) = tracked_process {
+        mark_stop_requested(&state, &project_id).await;
+
+        if running.pid.is_none() {
+            let managed_port = running
+                .public_port
+                .or(project.as_ref().and_then(|entry| entry.port));
+            request_managed_server_shutdown(&running);
+            if !wait_for_managed_server_shutdown(&running, managed_port).await {
+                if let Some(project) = project.as_ref() {
+                    emit_log(
+                        &app,
+                        &project_id,
+                        "system",
+                        "Managed server stop timed out, escalating to force stop by port/root path",
+                    );
+                    match force_stop_project(&app, project, Some(&running)).await {
+                        Ok(message) => {
+                            mark_project_stopped(&app, &state, &project_id, message)
+                                .await
+                                .map_err(|error| error.to_string())?;
+                            return Ok(());
+                        }
+                        Err(error) => {
+                            clear_stop_requested(&state, &project_id).await;
+                            let message = format!("Failed to stop {}: {}", project_name, error);
+                            mark_project_stop_failure(&app, &state, &project_id, message.clone())
+                                .map_err(|error| error.to_string())?;
+                            return Err(message);
+                        }
+                    }
+                }
+
+                clear_stop_requested(&state, &project_id).await;
+                let message = managed_server_stop_failure(&project_name, managed_port);
+                mark_project_stop_failure(&app, &state, &project_id, message.clone())
+                    .map_err(|error| error.to_string())?;
+                return Err(message);
+            }
+
+            mark_project_stopped(&app, &state, &project_id, "Managed server stopped")
+                .await
+                .map_err(|error| error.to_string())?;
+            return Ok(());
+        }
+
+        let pid = running.pid.unwrap();
+        let output = match stop_pid(&app, &project_id, pid).await {
+            Ok(output) => output,
+            Err(error) => {
+                clear_stop_requested(&state, &project_id).await;
+                let message = format!("Failed to stop {}: {}", project_name, error);
+                mark_project_stop_failure(&app, &state, &project_id, message.clone())
+                    .map_err(|persist_error| persist_error.to_string())?;
+                return Err(message);
+            }
+        };
+
+        let process_missing = output_indicates_missing_process(&output);
+
+        if output.status.success() || process_missing {
+            let managed_port = running
+                .public_port
+                .or(project.as_ref().and_then(|entry| entry.port));
+            request_managed_server_shutdown(&running);
+            if !wait_for_managed_server_shutdown(&running, managed_port).await {
+                if let Some(project) = project.as_ref() {
+                    emit_log(
+                        &app,
+                        &project_id,
+                        "system",
+                        "Managed server stop timed out after PID stop, escalating to force stop",
+                    );
+                    match force_stop_project(&app, project, Some(&running)).await {
+                        Ok(message) => {
+                            mark_project_stopped(&app, &state, &project_id, message)
+                                .await
+                                .map_err(|error| error.to_string())?;
+                            return Ok(());
+                        }
+                        Err(error) => {
+                            clear_stop_requested(&state, &project_id).await;
+                            let message = format!("Failed to stop {}: {}", project_name, error);
+                            mark_project_stop_failure(&app, &state, &project_id, message.clone())
+                                .map_err(|persist_error| persist_error.to_string())?;
+                            return Err(message);
+                        }
+                    }
+                }
+
+                clear_stop_requested(&state, &project_id).await;
+                let message = managed_server_stop_failure(&project_name, managed_port);
+                mark_project_stop_failure(&app, &state, &project_id, message.clone())
+                    .map_err(|error| error.to_string())?;
+                return Err(message);
+            }
+            remove_running_process(&state, &project_id).await;
+
+            if let Some(project) = project.as_ref() {
+                if !wait_for_project_process_release(&app, project).await {
+                    emit_log(
+                        &app,
+                        &project_id,
+                        "system",
+                        "Tracked PID stopped but project processes are still alive, escalating to force stop",
+                    );
+                    match force_stop_project(&app, project, Some(&running)).await {
+                        Ok(message) => {
+                            mark_project_stopped(&app, &state, &project_id, message)
+                                .await
+                                .map_err(|error| error.to_string())?;
+                            return Ok(());
+                        }
+                        Err(error) => {
+                            clear_stop_requested(&state, &project_id).await;
+                            let message = format!("Failed to stop {}: {}", project_name, error);
+                            mark_project_stop_failure(&app, &state, &project_id, message.clone())
+                                .map_err(|persist_error| persist_error.to_string())?;
+                            return Err(message);
+                        }
+                    }
+                }
+            }
+
+            mark_project_stopped(
+                &app,
+                &state,
+                &project_id,
+                if process_missing {
+                    "Process was already gone; state cleared"
+                } else {
+                    "Process stopped"
+                },
+            )
+            .await
+            .map_err(|error| error.to_string())?;
+            return Ok(());
+        }
+
+        clear_stop_requested(&state, &project_id).await;
+        let reason = command_failure_reason(&output);
+        if let Some(project) = project.as_ref() {
+            emit_log(
+                &app,
+                &project_id,
+                "system",
+                format!("Stop failed with `{reason}`, escalating to force stop"),
+            );
+            match force_stop_project(&app, project, Some(&running)).await {
+                Ok(message) => {
+                    mark_project_stopped(&app, &state, &project_id, message)
+                        .await
+                        .map_err(|error| error.to_string())?;
+                    return Ok(());
+                }
+                Err(error) => {
+                    let message = format!("Failed to stop {}: {}", project_name, error);
+                    mark_project_stop_failure(&app, &state, &project_id, message.clone())
+                        .map_err(|persist_error| persist_error.to_string())?;
+                    return Err(message);
+                }
+            }
+        }
+
+        let message = format!("Failed to stop {}: {}", project_name, reason);
+        mark_project_stop_failure(&app, &state, &project_id, message.clone())
+            .map_err(|error| error.to_string())?;
+        return Err(message);
+    }
+
+    if matches!(
+        project.as_ref().map(|entry| entry.status.clone()),
+        Some(ProjectStatus::Starting | ProjectStatus::Running | ProjectStatus::Ready)
+    ) {
+        if let Some(project) = project.as_ref() {
+            if !wait_for_project_process_release(&app, project).await {
+                emit_log(
+                    &app,
+                    &project_id,
+                    "system",
+                    "No tracked PID was found, escalating to force stop by port/root path",
+                );
+                match force_stop_project(&app, project, None).await {
+                    Ok(message) => {
+                        mark_project_stopped(&app, &state, &project_id, message)
+                            .await
+                            .map_err(|error| error.to_string())?;
+                        return Ok(());
+                    }
+                    Err(error) => {
+                        let message = format!("Failed to stop {}: {}", project_name, error);
+                        mark_project_stop_failure(&app, &state, &project_id, message.clone())
+                            .map_err(|persist_error| persist_error.to_string())?;
+                        return Err(message);
+                    }
+                }
+            }
+        }
+
+        mark_project_stopped(&app, &state, &project_id, "No tracked pid; state cleared")
+            .await
+            .map_err(|error| error.to_string())?;
     }
 
     Ok(())
@@ -1890,10 +2308,7 @@ pub async fn stop_selected(
             .filter(|project| {
                 matches!(
                     project.status,
-                    ProjectStatus::Starting
-                        | ProjectStatus::Running
-                        | ProjectStatus::Ready
-                        | ProjectStatus::Failed
+                    ProjectStatus::Starting | ProjectStatus::Running | ProjectStatus::Ready
                 )
             })
             .map(|project| project.id)
@@ -1904,244 +2319,112 @@ pub async fn stop_selected(
         return Ok(());
     }
 
-    let mut failures = Vec::new();
+    let tasks = selected_ids
+        .into_iter()
+        .map(|project_id| {
+            let app = app.clone();
+            let state = state.clone();
+            let project = project_map.get(&project_id).cloned();
+            tokio::spawn(async move {
+                stop_selected_project_task(app, state, project_id, project).await
+            })
+        })
+        .collect();
 
-    for project_id in selected_ids {
-        let tracked_process = runtime_entry(&state, &project_id).await;
-        let project = project_map.get(&project_id);
-        let project_name = project
-            .map(|entry| entry.name.clone())
-            .unwrap_or_else(|| project_id.clone());
-
-        if let Some(running) = tracked_process {
-            mark_stop_requested(&state, &project_id).await;
-
-            if running.pid.is_none() {
-                let managed_port = running.public_port.or(project.and_then(|entry| entry.port));
-                request_managed_server_shutdown(&running);
-                if !wait_for_managed_server_shutdown(&running, managed_port).await {
-                    if let Some(project) = project {
-                        emit_log(
-                            &app,
-                            &project_id,
-                            "system",
-                            "Managed server stop timed out, escalating to force stop by port/root path",
-                        );
-                        match force_stop_project(&app, project, Some(&running)).await {
-                            Ok(message) => {
-                                mark_project_stopped(&app, &state, &project_id, message).await?;
-                                continue;
-                            }
-                            Err(error) => {
-                                clear_stop_requested(&state, &project_id).await;
-                                let message = format!("Failed to stop {}: {}", project_name, error);
-                                mark_project_stop_failure(
-                                    &app,
-                                    &state,
-                                    &project_id,
-                                    message.clone(),
-                                )?;
-                                failures.push(message);
-                                continue;
-                            }
-                        }
-                    }
-
-                    clear_stop_requested(&state, &project_id).await;
-                    let message = managed_server_stop_failure(&project_name, managed_port);
-                    mark_project_stop_failure(&app, &state, &project_id, message.clone())?;
-                    failures.push(message);
-                    continue;
-                }
-                mark_project_stopped(&app, &state, &project_id, "Managed server stopped").await?;
-                continue;
-            }
-
-            let pid = running.pid.unwrap();
-            let output = match stop_pid(&app, &project_id, pid).await {
-                Ok(output) => output,
-                Err(error) => {
-                    clear_stop_requested(&state, &project_id).await;
-                    let message = format!("Failed to stop {}: {}", project_name, error);
-                    db::update_project_status(
-                        &state.db_path,
-                        &project_id,
-                        ProjectStatus::Failed,
-                        None,
-                    )?;
-                    emit_status(
-                        &app,
-                        &project_id,
-                        ProjectStatus::Failed,
-                        None,
-                        Some(message.clone()),
-                    );
-                    emit_log(&app, &project_id, "stderr", message.clone());
-                    failures.push(message);
-                    continue;
-                }
-            };
-
-            let process_missing = output_indicates_missing_process(&output);
-
-            if output.status.success() || process_missing {
-                let managed_port = running.public_port.or(project.and_then(|entry| entry.port));
-                request_managed_server_shutdown(&running);
-                if !wait_for_managed_server_shutdown(&running, managed_port).await {
-                    if let Some(project) = project {
-                        emit_log(
-                            &app,
-                            &project_id,
-                            "system",
-                            "Managed server stop timed out after PID stop, escalating to force stop",
-                        );
-                        match force_stop_project(&app, project, Some(&running)).await {
-                            Ok(message) => {
-                                mark_project_stopped(&app, &state, &project_id, message).await?;
-                                continue;
-                            }
-                            Err(error) => {
-                                clear_stop_requested(&state, &project_id).await;
-                                let message = format!("Failed to stop {}: {}", project_name, error);
-                                mark_project_stop_failure(
-                                    &app,
-                                    &state,
-                                    &project_id,
-                                    message.clone(),
-                                )?;
-                                failures.push(message);
-                                continue;
-                            }
-                        }
-                    }
-
-                    clear_stop_requested(&state, &project_id).await;
-                    let message = managed_server_stop_failure(&project_name, managed_port);
-                    mark_project_stop_failure(&app, &state, &project_id, message.clone())?;
-                    failures.push(message);
-                    continue;
-                }
-                remove_running_process(&state, &project_id).await;
-
-                if let Some(project) = project {
-                    if !wait_for_project_process_release(&app, project).await {
-                        emit_log(
-                            &app,
-                            &project_id,
-                            "system",
-                            "Tracked PID stopped but project processes are still alive, escalating to force stop",
-                        );
-                        match force_stop_project(&app, project, Some(&running)).await {
-                            Ok(message) => {
-                                mark_project_stopped(&app, &state, &project_id, message).await?;
-                                continue;
-                            }
-                            Err(error) => {
-                                clear_stop_requested(&state, &project_id).await;
-                                let message = format!("Failed to stop {}: {}", project_name, error);
-                                mark_project_stop_failure(
-                                    &app,
-                                    &state,
-                                    &project_id,
-                                    message.clone(),
-                                )?;
-                                failures.push(message);
-                                continue;
-                            }
-                        }
-                    }
-                }
-
-                mark_project_stopped(
-                    &app,
-                    &state,
-                    &project_id,
-                    if process_missing {
-                        "Process was already gone; state cleared"
-                    } else {
-                        "Process stopped"
-                    },
-                )
-                .await?;
-                continue;
-            }
-
-            clear_stop_requested(&state, &project_id).await;
-            let reason = command_failure_reason(&output);
-            if let Some(project) = project {
-                emit_log(
-                    &app,
-                    &project_id,
-                    "system",
-                    format!("Stop failed with `{reason}`, escalating to force stop"),
-                );
-                match force_stop_project(&app, project, Some(&running)).await {
-                    Ok(message) => {
-                        mark_project_stopped(&app, &state, &project_id, message).await?;
-                        continue;
-                    }
-                    Err(error) => {
-                        let message = format!("Failed to stop {}: {}", project_name, error);
-                        mark_project_stop_failure(&app, &state, &project_id, message.clone())?;
-                        failures.push(message);
-                        continue;
-                    }
-                }
-            }
-
-            let message = format!("Failed to stop {}: {}", project_name, reason);
-            mark_project_stop_failure(&app, &state, &project_id, message.clone())?;
-            failures.push(message);
-            continue;
-        }
-
-        if matches!(
-            project.map(|entry| entry.status.clone()),
-            Some(
-                ProjectStatus::Starting
-                    | ProjectStatus::Running
-                    | ProjectStatus::Ready
-                    | ProjectStatus::Failed
-            )
-        ) {
-            if let Some(project) = project {
-                if !wait_for_project_process_release(&app, project).await {
-                    emit_log(
-                        &app,
-                        &project_id,
-                        "system",
-                        "No tracked PID was found, escalating to force stop by port/root path",
-                    );
-                    match force_stop_project(&app, project, None).await {
-                        Ok(message) => {
-                            mark_project_stopped(&app, &state, &project_id, message).await?;
-                            continue;
-                        }
-                        Err(error) => {
-                            let message = format!("Failed to stop {}: {}", project_name, error);
-                            mark_project_stop_failure(&app, &state, &project_id, message.clone())?;
-                            failures.push(message);
-                            continue;
-                        }
-                    }
-                }
-            }
-
-            mark_project_stopped(&app, &state, &project_id, "No tracked pid; state cleared")
-                .await?;
-        }
-    }
-
-    if failures.is_empty() {
-        Ok(())
-    } else {
-        Err(anyhow!(failures.join("\n")))
-    }
+    wait_for_project_tasks(tasks, "stop").await
 }
 pub async fn shutdown_all(app: AppHandle, state: AppState) -> Result<()> {
     let _ = stop_selected(app.clone(), state.clone(), None).await;
     let _ = force_stop_selected(app, state, None).await;
     Ok(())
+}
+
+async fn force_stop_selected_project_task(
+    app: AppHandle,
+    state: AppState,
+    project_id: String,
+    project: Option<Project>,
+) -> Result<(), String> {
+    let Some(project) = project else {
+        return Ok(());
+    };
+
+    let tracked_process = runtime_entry(&state, &project_id).await;
+
+    if tracked_process.is_some() {
+        mark_stop_requested(&state, &project_id).await;
+    }
+
+    if let Some(running) = tracked_process.as_ref() {
+        request_managed_server_shutdown(running);
+
+        if running.pid.is_none() {
+            let managed_port = running.public_port.or(project.port);
+            if !wait_for_managed_server_shutdown(running, managed_port).await {
+                emit_log(
+                    &app,
+                    &project_id,
+                    "system",
+                    "Managed server force stop timed out, retrying with PID/port cleanup",
+                );
+            } else {
+                clear_runtime_tracking(&state, &project_id).await;
+                db::update_project_status(
+                    &state.db_path,
+                    &project_id,
+                    ProjectStatus::Stopped,
+                    Some(0),
+                )
+                .map_err(|error| error.to_string())?;
+                emit_status(
+                    &app,
+                    &project_id,
+                    ProjectStatus::Stopped,
+                    Some(0),
+                    Some("Managed server force stopped".to_string()),
+                );
+                emit_log(&app, &project_id, "system", "Managed server force stopped");
+                return Ok(());
+            }
+        }
+    }
+
+    match force_stop_project(&app, &project, tracked_process.as_ref()).await {
+        Ok(message) => {
+            if tracked_process.is_some() {
+                remove_running_process(&state, &project_id).await;
+            } else {
+                clear_runtime_tracking(&state, &project_id).await;
+            }
+
+            db::update_project_status(&state.db_path, &project_id, ProjectStatus::Stopped, Some(0))
+                .map_err(|error| error.to_string())?;
+            emit_status(
+                &app,
+                &project_id,
+                ProjectStatus::Stopped,
+                Some(0),
+                Some(message.clone()),
+            );
+            emit_log(&app, &project_id, "system", message);
+            Ok(())
+        }
+        Err(error) => {
+            clear_stop_requested(&state, &project_id).await;
+            let message = format!("Failed to force stop {}: {}", project.name, error);
+            db::update_project_status(&state.db_path, &project_id, ProjectStatus::Failed, None)
+                .map_err(|persist_error| persist_error.to_string())?;
+            emit_status(
+                &app,
+                &project_id,
+                ProjectStatus::Failed,
+                None,
+                Some(message.clone()),
+            );
+            emit_log(&app, &project_id, "stderr", message.clone());
+            Err(message)
+        }
+    }
 }
 
 pub async fn force_stop_selected(
@@ -2177,101 +2460,19 @@ pub async fn force_stop_selected(
         return Ok(());
     }
 
-    let mut failures = Vec::new();
+    let tasks = selected_ids
+        .into_iter()
+        .map(|project_id| {
+            let app = app.clone();
+            let state = state.clone();
+            let project = project_map.get(&project_id).cloned();
+            tokio::spawn(async move {
+                force_stop_selected_project_task(app, state, project_id, project).await
+            })
+        })
+        .collect();
 
-    for project_id in selected_ids {
-        let tracked_process = runtime_entry(&state, &project_id).await;
-        let Some(project) = project_map.get(&project_id) else {
-            continue;
-        };
-
-        if tracked_process.is_some() {
-            mark_stop_requested(&state, &project_id).await;
-        }
-
-        if let Some(running) = tracked_process.as_ref() {
-            request_managed_server_shutdown(running);
-
-            if running.pid.is_none() {
-                let managed_port = running.public_port.or(project.port);
-                if !wait_for_managed_server_shutdown(running, managed_port).await {
-                    emit_log(
-                        &app,
-                        &project_id,
-                        "system",
-                        "Managed server force stop timed out, retrying with PID/port cleanup",
-                    );
-                } else {
-                    clear_runtime_tracking(&state, &project_id).await;
-                    db::update_project_status(
-                        &state.db_path,
-                        &project_id,
-                        ProjectStatus::Stopped,
-                        Some(0),
-                    )?;
-                    emit_status(
-                        &app,
-                        &project_id,
-                        ProjectStatus::Stopped,
-                        Some(0),
-                        Some("Managed server force stopped".to_string()),
-                    );
-                    emit_log(&app, &project_id, "system", "Managed server force stopped");
-                    continue;
-                }
-            }
-        }
-
-        match force_stop_project(&app, project, tracked_process.as_ref()).await {
-            Ok(message) => {
-                if tracked_process.is_some() {
-                    remove_running_process(&state, &project_id).await;
-                } else {
-                    clear_runtime_tracking(&state, &project_id).await;
-                }
-
-                db::update_project_status(
-                    &state.db_path,
-                    &project_id,
-                    ProjectStatus::Stopped,
-                    Some(0),
-                )?;
-                emit_status(
-                    &app,
-                    &project_id,
-                    ProjectStatus::Stopped,
-                    Some(0),
-                    Some(message.clone()),
-                );
-                emit_log(&app, &project_id, "system", message);
-            }
-            Err(error) => {
-                clear_stop_requested(&state, &project_id).await;
-                let message = format!("Failed to force stop {}: {}", project.name, error);
-                db::update_project_status(
-                    &state.db_path,
-                    &project_id,
-                    ProjectStatus::Failed,
-                    None,
-                )?;
-                emit_status(
-                    &app,
-                    &project_id,
-                    ProjectStatus::Failed,
-                    None,
-                    Some(message.clone()),
-                );
-                emit_log(&app, &project_id, "stderr", message.clone());
-                failures.push(message);
-            }
-        }
-    }
-
-    if failures.is_empty() {
-        Ok(())
-    } else {
-        Err(anyhow!(failures.join("\n")))
-    }
+    wait_for_project_tasks(tasks, "force stop").await
 }
 
 #[cfg(test)]

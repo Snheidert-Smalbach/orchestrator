@@ -242,6 +242,25 @@ pub fn delete_project_mock(
 }
 
 #[tauri::command]
+pub fn delete_all_project_mocks(
+    app: AppHandle,
+    project_id: String,
+    state: State<'_, AppState>,
+) -> Result<ProjectMockCollection, String> {
+    let collection = map_error(mock_catalog::delete_all_project_mocks(
+        &state.db_path,
+        &project_id,
+    ))?;
+    map_error(db::update_project_mock_summary(
+        &state.db_path,
+        &project_id,
+        &collection.summary,
+    ))?;
+    emit_project_mock_summary(&app, &project_id, collection.summary.clone());
+    Ok(collection)
+}
+
+#[tauri::command]
 pub async fn start_projects(
     app: AppHandle,
     state: State<'_, AppState>,

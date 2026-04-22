@@ -1,9 +1,9 @@
 use std::{
     collections::HashMap,
-    fs::{self, OpenOptions},
-    io::Write,
+    fs,
     path::{Path, PathBuf},
     sync::{
+        atomic::{AtomicUsize, Ordering},
         mpsc::{self, Sender},
         Arc, Mutex, OnceLock,
     },
@@ -17,12 +17,12 @@ use tauri::{AppHandle, Emitter};
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::{TcpListener, TcpStream},
-    sync::watch,
+    sync::{watch, Notify},
     time::timeout,
 };
 
 use crate::{
-    db,
+    db, mock_catalog,
     models::{MockMatchMode, Project, ProjectMockSummaryPayload, ServiceTrafficEvent},
 };
 
@@ -145,6 +145,44 @@ impl ManagedServerHandle {
     }
 }
 
+#[derive(Debug, Clone, Default)]
+struct ConnectionTracker {
+    active_count: Arc<AtomicUsize>,
+    drained_notify: Arc<Notify>,
+}
+
+impl ConnectionTracker {
+    fn start(&self) -> ActiveConnectionGuard {
+        self.active_count.fetch_add(1, Ordering::SeqCst);
+        ActiveConnectionGuard {
+            tracker: self.clone(),
+        }
+    }
+
+    fn is_idle(&self) -> bool {
+        self.active_count.load(Ordering::SeqCst) == 0
+    }
+
+    async fn wait_until_idle(&self) {
+        while !self.is_idle() {
+            self.drained_notify.notified().await;
+        }
+    }
+}
+
+#[derive(Debug)]
+struct ActiveConnectionGuard {
+    tracker: ConnectionTracker,
+}
+
+impl Drop for ActiveConnectionGuard {
+    fn drop(&mut self) {
+        if self.tracker.active_count.fetch_sub(1, Ordering::SeqCst) == 1 {
+            self.tracker.drained_notify.notify_waiters();
+        }
+    }
+}
+
 fn timestamp_now() -> String {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -186,13 +224,9 @@ fn emit_project_mock_summary(
 fn persist_capture_job(job: CapturePersistJob) -> Result<()> {
     let result = (|| -> Result<_> {
         append_exchange(&job.db_path, &job.project_id, &job.exchange)?;
-        db::append_captured_mock_summary(
-            &job.db_path,
-            &job.project_id,
-            &job.exchange.request.path,
-            &job.exchange.recorded_at,
-            matches!(job.exchange.kind, TrafficKind::Graphql),
-        )
+        let summary = mock_catalog::summarize_project_mocks(&job.db_path, &job.project_id)?;
+        db::update_project_mock_summary(&job.db_path, &job.project_id, &summary)?;
+        Ok(summary)
     })();
 
     match result {
@@ -309,6 +343,7 @@ pub async fn start_recording_proxy(
         .with_context(|| format!("Could not bind recording proxy on port {public_port}"))?;
     let (shutdown_tx, mut shutdown_rx) = watch::channel(false);
     let (stopped_tx, stopped_rx) = watch::channel(false);
+    let connection_tracker = ConnectionTracker::default();
     let project_id = project.id.clone();
     let capture_path = capture_file_for_project(&db_path, &project.id);
     let capture_dir = capture_dir_for_project(&db_path, &project.id);
@@ -325,43 +360,58 @@ pub async fn start_recording_proxy(
     );
 
     tokio::spawn(async move {
-        loop {
-            tokio::select! {
-                changed = shutdown_rx.changed() => {
-                    if changed.is_ok() && *shutdown_rx.borrow() {
-                        emit_log(&app, &project_id, "system", format!("Recording proxy stopped on port {public_port}"));
-                        break;
-                    }
-                }
-                accepted = listener.accept() => {
-                    let Ok((socket, address)) = accepted else {
-                        emit_log(&app, &project_id, "stderr", format!("Recording proxy accept failed on {public_port}"));
-                        continue;
-                    };
-
-                    let app_handle = app.clone();
-                    let db_path = db_path.clone();
-                    let project = project.clone();
-                    let project_id = project_id.clone();
-                    tokio::spawn(async move {
-                        if let Err(error) = handle_proxy_connection(
-                            app_handle.clone(),
-                            db_path,
-                            project,
-                            socket,
-                            address.to_string(),
-                            upstream_port,
-                        )
-                        .await
-                        {
-                            emit_log(&app_handle, &project_id, "stderr", format!("Recording proxy error: {error}"));
+        {
+            let listener = listener;
+            loop {
+                tokio::select! {
+                    changed = shutdown_rx.changed() => {
+                        if changed.is_ok() && *shutdown_rx.borrow() {
+                            emit_log(&app, &project_id, "system", format!("Recording proxy stopped on port {public_port}"));
+                            break;
                         }
-                    });
+                    }
+                    accepted = listener.accept() => {
+                        let Ok((socket, address)) = accepted else {
+                            emit_log(&app, &project_id, "stderr", format!("Recording proxy accept failed on {public_port}"));
+                            continue;
+                        };
+
+                        let app_handle = app.clone();
+                        let db_path = db_path.clone();
+                        let project = project.clone();
+                        let project_id = project_id.clone();
+                        let connection_guard = connection_tracker.start();
+                        tokio::spawn(async move {
+                            let _connection_guard = connection_guard;
+                            if let Err(error) = handle_proxy_connection(
+                                app_handle.clone(),
+                                db_path,
+                                project,
+                                socket,
+                                address.to_string(),
+                                upstream_port,
+                            )
+                            .await
+                            {
+                                emit_log(&app_handle, &project_id, "stderr", format!("Recording proxy error: {error}"));
+                            }
+                        });
+                    }
                 }
             }
         }
 
         let _ = stopped_tx.send(true);
+
+        if !connection_tracker.is_idle() {
+            emit_log(
+                &app,
+                &project_id,
+                "system",
+                format!("Recording proxy closed listener on {public_port}; waiting for in-flight connections to finish"),
+            );
+            connection_tracker.wait_until_idle().await;
+        }
     });
 
     Ok(ManagedServerHandle {
@@ -381,6 +431,7 @@ pub async fn start_mock_server(
         .with_context(|| format!("Could not bind mock server on port {public_port}"))?;
     let (shutdown_tx, mut shutdown_rx) = watch::channel(false);
     let (stopped_tx, stopped_rx) = watch::channel(false);
+    let connection_tracker = ConnectionTracker::default();
     let project_id = project.id.clone();
     let RegistryLoad { entries, warnings } = load_registry(&db_path, &project.id)?;
     let captures_count = entries.len();
@@ -398,42 +449,57 @@ pub async fn start_mock_server(
     }
 
     tokio::spawn(async move {
-        loop {
-            tokio::select! {
-                changed = shutdown_rx.changed() => {
-                    if changed.is_ok() && *shutdown_rx.borrow() {
-                        emit_log(&app, &project_id, "system", format!("Mock server stopped on port {public_port}"));
-                        break;
-                    }
-                }
-                accepted = listener.accept() => {
-                    let Ok((socket, address)) = accepted else {
-                        emit_log(&app, &project_id, "stderr", format!("Mock accept failed on {public_port}"));
-                        continue;
-                    };
-
-                    let app_handle = app.clone();
-                    let db_path = db_path.clone();
-                    let project = project.clone();
-                    let project_id = project_id.clone();
-                    tokio::spawn(async move {
-                        if let Err(error) = handle_mock_connection(
-                            app_handle.clone(),
-                            db_path,
-                            project,
-                            socket,
-                            address.to_string(),
-                        )
-                        .await
-                        {
-                            emit_log(&app_handle, &project_id, "stderr", format!("Mock response error: {error}"));
+        {
+            let listener = listener;
+            loop {
+                tokio::select! {
+                    changed = shutdown_rx.changed() => {
+                        if changed.is_ok() && *shutdown_rx.borrow() {
+                            emit_log(&app, &project_id, "system", format!("Mock server stopped on port {public_port}"));
+                            break;
                         }
-                    });
+                    }
+                    accepted = listener.accept() => {
+                        let Ok((socket, address)) = accepted else {
+                            emit_log(&app, &project_id, "stderr", format!("Mock accept failed on {public_port}"));
+                            continue;
+                        };
+
+                        let app_handle = app.clone();
+                        let db_path = db_path.clone();
+                        let project = project.clone();
+                        let project_id = project_id.clone();
+                        let connection_guard = connection_tracker.start();
+                        tokio::spawn(async move {
+                            let _connection_guard = connection_guard;
+                            if let Err(error) = handle_mock_connection(
+                                app_handle.clone(),
+                                db_path,
+                                project,
+                                socket,
+                                address.to_string(),
+                            )
+                            .await
+                            {
+                                emit_log(&app_handle, &project_id, "stderr", format!("Mock response error: {error}"));
+                            }
+                        });
+                    }
                 }
             }
         }
 
         let _ = stopped_tx.send(true);
+
+        if !connection_tracker.is_idle() {
+            emit_log(
+                &app,
+                &project_id,
+                "system",
+                format!("Mock server closed listener on {public_port}; waiting for in-flight connections to finish"),
+            );
+            connection_tracker.wait_until_idle().await;
+        }
     });
 
     Ok(ManagedServerHandle {
@@ -649,23 +715,69 @@ fn load_registry(db_path: &Path, project_id: &str) -> Result<RegistryLoad> {
     Ok(registry)
 }
 
+fn request_identity_matches(
+    left_kind: &TrafficKind,
+    left: &RecordedRequest,
+    right_kind: &TrafficKind,
+    right: &RecordedRequest,
+) -> bool {
+    if left_kind != right_kind {
+        return false;
+    }
+
+    if !left.method.eq_ignore_ascii_case(&right.method) || left.path != right.path {
+        return false;
+    }
+
+    match left_kind {
+        TrafficKind::Graphql => left.normalized_body == right.normalized_body,
+        TrafficKind::Rest => {
+            left.normalized_query == right.normalized_query
+                && left.normalized_body == right.normalized_body
+        }
+        TrafficKind::HttpOther => {
+            left.normalized_query == right.normalized_query && left.body_hex == right.body_hex
+        }
+    }
+}
+
+fn rewrite_registry_entries(path: &Path, entries: &[RecordedExchange]) -> Result<()> {
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+
+    let mut payload = Vec::new();
+    for entry in entries {
+        payload.extend_from_slice(&serde_json::to_vec(entry)?);
+        payload.push(b'\n');
+    }
+
+    fs::write(path, payload)?;
+    Ok(())
+}
+
 fn append_exchange(db_path: &Path, project_id: &str, exchange: &RecordedExchange) -> Result<()> {
     let path = capture_file_for_project(db_path, project_id);
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
     }
 
-    let mut payload = serde_json::to_vec(exchange)?;
-    payload.push(b'\n');
-
     let append_lock = capture_append_lock(&path);
     let _guard = append_lock
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
 
-    let mut file = OpenOptions::new().create(true).append(true).open(path)?;
-    file.write_all(&payload)?;
-    file.flush()?;
+    let mut registry = load_registry(db_path, project_id)?;
+    registry.entries.retain(|entry| {
+        !request_identity_matches(
+            &entry.kind,
+            &entry.request,
+            &exchange.kind,
+            &exchange.request,
+        )
+    });
+    registry.entries.push(exchange.clone());
+    rewrite_registry_entries(&path, &registry.entries)?;
     Ok(())
 }
 
@@ -718,9 +830,9 @@ fn find_matching_exchange<'a>(
                     }
                     TrafficKind::HttpOther => {
                         if request.body_hex.is_empty() {
-                            entry.request.query == request.query
+                            entry.request.normalized_query == request.normalized_query
                         } else {
-                            entry.request.query == request.query
+                            entry.request.normalized_query == request.normalized_query
                                 && entry.request.body_hex == request.body_hex
                         }
                     }
@@ -1418,6 +1530,41 @@ mod tests {
             .expect("capture file");
         let line = raw.lines().next().expect("jsonl line");
         serde_json::from_str::<RecordedExchange>(line).expect("valid json line");
+
+        cleanup_temp_root(&db_path);
+    }
+
+    #[test]
+    fn append_exchange_replaces_existing_capture_with_same_request_identity() {
+        let db_path = temp_db_path();
+        let first = sample_exchange();
+        let mut second = sample_exchange();
+        second.request.headers.push(HeaderEntry {
+            name: "Authorization".to_string(),
+            value: "Bearer updated".to_string(),
+        });
+        second.response.body_hex = hex_encode(br#"{"data":{"ping":"updated"}}"#);
+        second.response.body_preview = r#"{"data":{"ping":"updated"}}"#.to_string();
+
+        append_exchange(&db_path, "project-identity", &first).expect("append first");
+        append_exchange(&db_path, "project-identity", &second).expect("append second");
+        let registry = load_registry(&db_path, "project-identity").expect("load registry");
+
+        assert!(registry.warnings.is_empty());
+        assert_eq!(registry.entries.len(), 1);
+        assert_eq!(
+            registry.entries[0].request.normalized_body,
+            second.request.normalized_body
+        );
+        assert_eq!(
+            registry.entries[0].response.body_hex,
+            second.response.body_hex
+        );
+        assert!(registry.entries[0]
+            .request
+            .headers
+            .iter()
+            .any(|header| header.name == "Authorization"));
 
         cleanup_temp_root(&db_path);
     }

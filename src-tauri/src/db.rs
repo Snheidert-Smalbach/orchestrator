@@ -173,13 +173,6 @@ fn ensure_project_columns(conn: &Connection) -> Result<bool> {
     Ok(needs_mock_summary_backfill)
 }
 
-fn compare_summary_timestamps(left: &str, right: &str) -> std::cmp::Ordering {
-    match (left.parse::<u128>(), right.parse::<u128>()) {
-        (Ok(left), Ok(right)) => left.cmp(&right),
-        _ => left.cmp(right),
-    }
-}
-
 fn save_project_mock_summary_with_conn(
     conn: &Connection,
     project_id: &str,
@@ -207,40 +200,6 @@ fn save_project_mock_summary_with_conn(
         ],
     )?;
     Ok(())
-}
-
-fn load_project_mock_summary_from_conn(
-    conn: &Connection,
-    project_id: &str,
-) -> Result<ProjectMockSummary> {
-    Ok(conn
-        .query_row(
-            "SELECT
-                mock_total_count,
-                mock_graphql_count,
-                mock_rest_count,
-                mock_manual_count,
-                mock_captured_count,
-                mock_last_updated_at,
-                mock_routes_json
-             FROM projects
-             WHERE id = ?1",
-            [project_id],
-            |row| {
-                let routes_json: String = row.get(6)?;
-                Ok(ProjectMockSummary {
-                    total_count: row.get::<_, i64>(0)? as usize,
-                    graphql_count: row.get::<_, i64>(1)? as usize,
-                    rest_count: row.get::<_, i64>(2)? as usize,
-                    manual_count: row.get::<_, i64>(3)? as usize,
-                    captured_count: row.get::<_, i64>(4)? as usize,
-                    last_updated_at: row.get(5)?,
-                    routes: serde_json::from_str(&routes_json).unwrap_or_default(),
-                })
-            },
-        )
-        .optional()?
-        .unwrap_or_default())
 }
 
 fn load_mock_summary_cache_version(conn: &Connection) -> Result<Option<String>> {
@@ -1043,37 +1002,6 @@ pub fn update_project_mock_summary(
 ) -> Result<()> {
     let conn = open_connection(db_path)?;
     save_project_mock_summary_with_conn(&conn, project_id, summary)
-}
-
-pub fn append_captured_mock_summary(
-    db_path: &Path,
-    project_id: &str,
-    request_path: &str,
-    recorded_at: &str,
-    is_graphql: bool,
-) -> Result<ProjectMockSummary> {
-    let conn = open_connection(db_path)?;
-    let mut summary = load_project_mock_summary_from_conn(&conn, project_id)?;
-    summary.total_count += 1;
-    if is_graphql {
-        summary.graphql_count += 1;
-    } else {
-        summary.rest_count += 1;
-    }
-    summary.captured_count += 1;
-    if summary.routes.len() < 4 && !summary.routes.iter().any(|route| route == request_path) {
-        summary.routes.push(request_path.to_string());
-    }
-    if summary
-        .last_updated_at
-        .as_ref()
-        .map(|current| compare_summary_timestamps(recorded_at, current).is_gt())
-        .unwrap_or(true)
-    {
-        summary.last_updated_at = Some(recorded_at.to_string());
-    }
-    save_project_mock_summary_with_conn(&conn, project_id, &summary)?;
-    Ok(summary)
 }
 
 pub fn build_snapshot(db_path: &Path) -> Result<Snapshot> {

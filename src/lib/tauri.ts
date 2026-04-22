@@ -1096,6 +1096,20 @@ export async function deleteProjectMock(projectId: string, mockId: string) {
   return collection;
 }
 
+export async function deleteAllProjectMocks(projectId: string) {
+  if (isTauriRuntime()) {
+    const collection = await invoke<ProjectMockCollection>("delete_all_project_mocks", { projectId });
+    return normalizeMockCollection(collection);
+  }
+
+  const collection = saveMockRegistry(projectId, {
+    summary: buildMockSummary([]),
+    mocks: [],
+  });
+  emitProjectMockSummary({ projectId, summary: collection.summary });
+  return collection;
+}
+
 export async function listenRuntimeEvents(
   onStatus: (payload: RuntimeStatusPayload) => void,
   onLog: (payload: LogPayload) => void,
