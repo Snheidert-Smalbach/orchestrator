@@ -391,18 +391,24 @@ fn infer_target_project<'a>(
     parsed: &ParsedUrlValue,
     projects: &'a [Project],
     runtime_ports: &HashMap<String, Option<u16>>,
+    inventories: &HashMap<String, BTreeMap<String, ResolvedEnvVariable>>,
 ) -> Option<&'a Project> {
     if let Some(port) = parsed.port {
         let by_port = projects
             .iter()
             .filter(|project| project.id != source_project.id)
             .filter(|project| {
-                runtime_ports
+                let effective_port = runtime_ports
                     .get(&project.id)
                     .copied()
                     .flatten()
                     .or(project.port)
-                    == Some(port)
+                    .or_else(|| {
+                        inventories
+                            .get(&project.id)
+                            .and_then(|inv| default_port_from_inventory(inv))
+                    });
+                effective_port == Some(port)
             })
             .collect::<Vec<_>>();
         if by_port.len() == 1 {
@@ -449,7 +455,7 @@ fn infer_connections(
                 continue;
             };
             let Some(target_project) =
-                infer_target_project(project, &parsed, projects, runtime_ports)
+                infer_target_project(project, &parsed, projects, runtime_ports, inventories)
             else {
                 continue;
             };
