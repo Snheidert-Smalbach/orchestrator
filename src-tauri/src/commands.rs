@@ -333,6 +333,7 @@ pub async fn open_service_topology_window(
     .center()
     .resizable(true)
     .focused(true)
+    .additional_browser_args("--disable-gpu")
     .build()
     .map(|_| ())
     .map_err(|error| error.to_string())

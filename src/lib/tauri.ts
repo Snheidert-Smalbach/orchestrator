@@ -1181,9 +1181,14 @@ export async function openServiceTopologyWindow(focusProjectId?: string | null) 
   const url = buildServiceTopologyWindowUrl(focusProjectId);
 
   if (isTauriRuntime()) {
-    await invoke("open_service_topology_window", {
-      focusProjectId: focusProjectId ?? null,
-    });
+    try {
+      await invoke("open_service_topology_window", {
+        focusProjectId: focusProjectId ?? null,
+      });
+    } catch (error) {
+      console.error("[Map] Failed to open topology window:", error);
+      throw error;
+    }
     return;
   }
 
@@ -1192,7 +1197,11 @@ export async function openServiceTopologyWindow(focusProjectId?: string | null) 
     SERVICE_TOPOLOGY_WINDOW_LABEL,
     "popup=yes,width=1760,height=1100,resizable=yes,scrollbars=yes",
   );
-  popup?.focus();
+  if (!popup) {
+    console.error("[Map] Popup was blocked by the browser. Allow popups for this site.");
+  } else {
+    popup.focus();
+  }
 }
 
 export async function pickRootFromDialog(defaultPath?: string | null) {

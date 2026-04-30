@@ -390,6 +390,43 @@ fn port_is_available(port: u16) -> bool {
     TcpListener::bind(("127.0.0.1", port)).is_ok()
 }
 
+/// Returns true if a process is actively LISTENING on the port.
+/// Returns false when only TIME_WAIT / CLOSE_WAIT connections remain (process already dead).
+/// On error, returns true (conservative: assume a listener exists).
+async fn port_has_active_listener(port: u16) -> bool {
+    if cfg!(windows) {
+        let script = format!(
+            "Get-NetTCPConnection -LocalPort {port} -State Listen -ErrorAction SilentlyContinue | Measure-Object | Select-Object -ExpandProperty Count"
+        );
+        if let Ok(output) = Command::new("powershell.exe")
+            .arg("-NoProfile")
+            .arg("-Command")
+            .arg(&script)
+            .output()
+            .await
+        {
+            let count = String::from_utf8_lossy(&output.stdout)
+                .trim()
+                .parse::<u32>()
+                .unwrap_or(0);
+            return count > 0;
+        }
+    } else {
+        // lsof -sTCP:LISTEN returns only LISTEN-state sockets
+        if let Ok(output) = Command::new("lsof")
+            .arg("-nP")
+            .arg(format!("-iTCP:{port}"))
+            .arg("-sTCP:LISTEN")
+            .arg("-t")
+            .output()
+            .await
+        {
+            return !String::from_utf8_lossy(&output.stdout).trim().is_empty();
+        }
+    }
+    true
+}
+
 async fn mark_stop_requested(state: &AppState, project_id: &str) {
     state
         .runtime
@@ -431,7 +468,13 @@ async fn wait_for_port_release(port: Option<u16>) -> bool {
         sleep(Duration::from_millis(250)).await;
     }
 
-    false
+    // The port is still not bindable after 10 s.  On Windows this commonly means the
+    // TCP stack has connections in TIME_WAIT state even though the owning process is
+    // already dead.  TIME_WAIT is an OS-level state that persists ~4 min after a
+    // connection closes and blocks TcpListener::bind() even with no running process.
+    // If nothing is actively LISTENING we treat the port as released — the service
+    // is gone and TIME_WAIT will drain on its own.
+    !port_has_active_listener(port).await
 }
 
 fn parse_command_output(output: &std::process::Output) -> (String, String) {

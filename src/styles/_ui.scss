@@ -728,6 +728,52 @@
   color: rgb(var(--color-text-muted));
 }
 
+.service-topology-window {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  overflow: hidden;
+  background: var(--app-background);
+}
+
+.service-topology-window__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.75rem 1rem;
+  border-bottom: 1px solid rgb(var(--color-line) / 0.16);
+  flex-shrink: 0;
+  background: rgb(var(--color-panel) / 0.96);
+}
+
+.service-topology-window__title {
+  margin: 0;
+  font-size: 0.9rem;
+  font-weight: 700;
+  color: rgb(var(--color-text-strong));
+}
+
+.service-topology-window__desc {
+  margin: 0.2rem 0 0;
+  font-size: 0.72rem;
+  line-height: 1.4;
+  color: rgb(var(--color-text-muted));
+}
+
+.service-topology-window__actions {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-shrink: 0;
+}
+
+.service-topology-window__body {
+  flex: 1 1 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
 .service-topology {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 440px;

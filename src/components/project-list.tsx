@@ -311,7 +311,7 @@ export function ProjectList({
             type="button"
             variant="secondary"
             size="sm"
-            onClick={() => void openServiceTopologyWindow(selectedProjectId)}
+            onClick={() => void openServiceTopologyWindow(selectedProjectId).catch((err: unknown) => console.error("[Map] Error:", err))}
             disabled={!projects.length}
             title={t("catalog.mapTitle")}
           >

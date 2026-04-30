@@ -1054,27 +1054,20 @@ function ServiceTopologySurface({ active, onOpenChange, focusProjectId, shell }:
       )
     : false;
 
-  return (
-    <DialogShell
-      open={active}
-      onOpenChange={onOpenChange ?? (() => undefined)}
-      title={t("topology.title")}
-      description={t("topology.description")}
-      contentClassName="ui-dialog-content--topology"
-      bodyClassName="ui-dialog-body--topology"
-      actions={
-        <>
-          <Button type="button" variant="secondary" size="sm" onClick={() => setTrafficEvents([])} disabled={!trafficEvents.length}>
-            <Activity className="h-3.5 w-3.5" />
-            {t("topology.clearActivity")}
-          </Button>
-          <Button type="button" variant="secondary" size="sm" onClick={() => void refreshSnapshot()} disabled={isLoading}>
-            <RefreshCw className={["h-3.5 w-3.5", isLoading ? "animate-spin" : ""].join(" ")} />
-            {t("topology.refresh")}
-          </Button>
-        </>
-      }
-    >
+  const actionsContent = (
+    <>
+      <Button type="button" variant="secondary" size="sm" onClick={() => setTrafficEvents([])} disabled={!trafficEvents.length}>
+        <Activity className="h-3.5 w-3.5" />
+        {t("topology.clearActivity")}
+      </Button>
+      <Button type="button" variant="secondary" size="sm" onClick={() => void refreshSnapshot()} disabled={isLoading}>
+        <RefreshCw className={["h-3.5 w-3.5", isLoading ? "animate-spin" : ""].join(" ")} />
+        {t("topology.refresh")}
+      </Button>
+    </>
+  );
+
+  const topologyBody = (
       <div className="service-topology">
         <div className="service-topology__canvas">
           {graphSnapshot ? (
@@ -1443,6 +1436,34 @@ function ServiceTopologySurface({ active, onOpenChange, focusProjectId, shell }:
           ) : null}
         </aside>
       </div>
+  );
+
+  if (shell === "standalone") {
+    return (
+      <div className="service-topology-window">
+        <div className="service-topology-window__header">
+          <div>
+            <h1 className="service-topology-window__title">{t("topology.title")}</h1>
+            <p className="service-topology-window__desc">{t("topology.description")}</p>
+          </div>
+          <div className="service-topology-window__actions">{actionsContent}</div>
+        </div>
+        <div className="service-topology-window__body">{topologyBody}</div>
+      </div>
+    );
+  }
+
+  return (
+    <DialogShell
+      open={active}
+      onOpenChange={onOpenChange ?? (() => undefined)}
+      title={t("topology.title")}
+      description={t("topology.description")}
+      contentClassName="ui-dialog-content--topology"
+      bodyClassName="ui-dialog-body--topology"
+      actions={actionsContent}
+    >
+      {topologyBody}
     </DialogShell>
   );
 }
