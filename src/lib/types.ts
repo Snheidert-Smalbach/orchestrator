@@ -254,3 +254,30 @@ export interface ServiceTrafficEvent {
   error: string | null;
   timestamp: string;
 }
+
+export type InfraNodeKind =
+  | "redis"
+  | "mongodb"
+  | "postgres"
+  | "mysql"
+  | "kafka"
+  | "rabbitmq"
+  | "elasticsearch"
+  | "s3"
+  | "smtp"
+  | "external";
+
+export interface TopologySession {
+  id: string;
+  name: string;
+  createdAt: string;
+  durationMs: number;
+  events: ServiceTrafficEvent[];
+}
+
+export interface ManualInfraNode {
+  id: string;
+  kind: InfraNodeKind;
+  label: string;
+  position: { x: number; y: number };
+}
